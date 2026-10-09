@@ -48,6 +48,13 @@ export interface StreamDescriptor {
   signature?: Uint8Array;
   /** SHA-256 of the Envelope's manifest part, bound by the signature. */
   manifestDigest?: Uint8Array;
+  /**
+   * The Envelope's manifest part (header ∥ sealed manifest), when it fits in a descriptor frame, so a receiver
+   * can show file names before the data completes (spec §6.5 step 4).
+   */
+  manifestPart?: Uint8Array;
+  /** Sender's display label (Air-gap without a device identity; otherwise the signed manifest carries it). */
+  senderLabel?: string;
 }
 
 export interface ReceiveProgress {

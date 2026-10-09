@@ -19,4 +19,4 @@ export * from "./protocol/paired";
 export * from "./protocol/pairing";
 export * from "./protocol/live";
 export * from "./fec/index";
-export * from "./facet/types";
+export * from "./facet/index";
