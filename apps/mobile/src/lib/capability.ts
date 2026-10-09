@@ -1,40 +1,27 @@
 /**
- * Quick capture capability check for the reverse key code (spec §7.7, ADR-0010 step 4). Before a stream exists
- * the receiver can only measure the camera's delivered frame rate and resolution; decode throughput and pixels
- * per cell are unknown, so the web receiver reports T1 when the camera delivers at least 24 fps at 720p and
- * T0 otherwise. Web receivers never claim T2/T3 (spec §10.1).
+ * Capability tier for the reverse key code (spec §7.7, ADR-0010 step 4). The tier a receiver reports caps the
+ * stream the sender produces, so it must reflect what this phone can actually decode — not just what its camera
+ * delivers. Facet decoding runs in JavaScript here (see ADR-0016), so the measured decode time per frame
+ * dominates: a sender's frame is held for ~100 ms, and a receiver that reads fewer than roughly one frame in
+ * eight cannot keep up with denser tiers.
+ *
+ * Without a measurement the phone reports T1. After every optical receive the measured capture rate and decode
+ * time are kept and the next offer uses them.
  */
 import type { Tier } from "@sealed/core";
 
-export interface CameraProbe {
-  fps: number;
-  width: number;
-  height: number;
+export interface OpticalMeasurement {
+  captureFps: number;
+  decodeMsPerFrame: number;
 }
 
-export function tierForProbe(p: CameraProbe): Tier {
-  if (p.fps >= 24 && Math.min(p.width, p.height) >= 720) return 1;
+export const DEFAULT_TIER: Tier = 1;
+
+export function tierForMeasurement(m: OpticalMeasurement | undefined): Tier {
+  if (!m || !Number.isFinite(m.decodeMsPerFrame) || m.decodeMsPerFrame <= 0) return DEFAULT_TIER;
+  if (m.captureFps < 20) return 0;
+  if (m.decodeMsPerFrame <= 150 && m.captureFps >= 50) return 3;
+  if (m.decodeMsPerFrame <= 300 && m.captureFps >= 28) return 2;
+  if (m.decodeMsPerFrame <= 1200) return 1;
   return 0;
-}
-
-/** Measures delivered fps over ~1 s with requestVideoFrameCallback (or the track settings when unavailable). */
-export async function probeCamera(video: HTMLVideoElement, stream: MediaStream, ms = 1000): Promise<CameraProbe> {
-  const track = stream.getVideoTracks()[0];
-  const settings = track?.getSettings() ?? {};
-  const width = settings.width ?? video.videoWidth;
-  const height = settings.height ?? video.videoHeight;
-  if (typeof video.requestVideoFrameCallback !== "function") return { fps: settings.frameRate ?? 0, width, height };
-  const times: number[] = [];
-  await new Promise<void>((resolve) => {
-    const end = performance.now() + ms;
-    const cb = (now: number) => {
-      times.push(now);
-      if (now < end) video.requestVideoFrameCallback(cb);
-      else resolve();
-    };
-    video.requestVideoFrameCallback(cb);
-    setTimeout(resolve, ms + 500);
-  });
-  const fps = times.length >= 2 ? ((times.length - 1) * 1000) / ((times[times.length - 1] as number) - (times[0] as number)) : (settings.frameRate ?? 0);
-  return { fps, width, height };
 }
