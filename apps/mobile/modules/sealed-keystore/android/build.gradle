@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'to.sealed'
+version = '0.1.0'
+
+android {
+  namespace "to.sealed.keystore"
+  defaultConfig {
+    // KeyProperties.PURPOSE_AGREE_KEY (hardware ECDH) and KeyInfo.getSecurityLevel() require API 31.
+    minSdkVersion 31
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  implementation "androidx.biometric:biometric:1.1.0"
+  implementation "androidx.fragment:fragment-ktx:1.8.9"
+  implementation "androidx.core:core-ktx:1.17.0"
+}
