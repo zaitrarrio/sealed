@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+  - services/*
+  - apps/*
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+  - sharp
