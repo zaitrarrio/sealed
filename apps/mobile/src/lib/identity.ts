@@ -82,7 +82,8 @@ export function approveScannedDevice(code: Extract<ParsedCode, { kind: "add-devi
   return session.withChainLock(async () => {
     const keys = requireKeys();
     const chain = await session.refreshOwnChain();
-    await approveNewDevice(session.getSnapshot().client, chain, keys.signing, code);
+    // Identity changes always prompt (Face ID / fingerprint / passcode), whatever the unlock window.
+    await approveNewDevice(session.getSnapshot().client, chain, keys.signing.fresh(`Add "${code.label}" to your identity`), code);
     return session.refreshOwnChain();
   });
 }
@@ -92,7 +93,7 @@ export function revokeOwnDevice(target: Uint8Array, reason: string): Promise<Cha
     const keys = requireKeys();
     if (ctEqual(compress(target), compress(keys.signing.publicKey))) throw new Error("Use another device or your paper key to revoke this device.");
     const chain = await session.refreshOwnChain();
-    await revokeDevice(session.getSnapshot().client, chain, keys.signing, target, reason);
+    await revokeDevice(session.getSnapshot().client, chain, keys.signing.fresh("Revoke a device"), target, reason);
     return session.refreshOwnChain();
   });
 }
@@ -101,7 +102,7 @@ export function newPaperKey(): Promise<string> {
   return session.withChainLock(async () => {
     const keys = requireKeys();
     const chain = await session.refreshOwnChain();
-    const { text } = await createPaperKey(session.getSnapshot().client, chain, keys.signing);
+    const { text } = await createPaperKey(session.getSnapshot().client, chain, keys.signing.fresh("Create a paper key"));
     await session.refreshOwnChain();
     await session.updateProfile({ paperKeyCreatedAt: Date.now() });
     return text;

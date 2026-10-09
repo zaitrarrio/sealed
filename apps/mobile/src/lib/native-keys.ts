@@ -166,3 +166,15 @@ export async function claimAttestation(challenge: Uint8Array): Promise<Uint8Arra
     return undefined;
   }
 }
+
+/**
+ * Prompts for Face ID / fingerprint / passcode and opens the signing key's authenticated window, so the next
+ * signed relay request (an approval carrying UV evidence {kind:"device"}) is backed by a fresh user check.
+ * Resolves false when the device has no hardware-gated key, which the relay never accepts as verification.
+ */
+export async function confirmUser(reason: string): Promise<boolean> {
+  const mod = nativeKeystore();
+  if (!mod) return false;
+  await mod.authenticate(DEVICE_ALIAS, reason);
+  return true;
+}
