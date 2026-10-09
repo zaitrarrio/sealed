@@ -1,0 +1,77 @@
+# Web client lifecycle (go-task). Run from apps/web or with `task -d apps/web <target>`.
+version: "3"
+
+vars:
+  RELAY_DIR: ../../services/relay
+
+tasks:
+  setup:
+    desc: Install dependencies and create .env.local from the template
+    cmds:
+      - task: install
+      - cmd: test -f .env.local || cp .env.example .env.local
+
+  install:
+    desc: Install workspace dependencies
+    dir: ../..
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  typecheck:
+    desc: Typecheck the app, tests and e2e harness (strict)
+    cmds:
+      - pnpm typecheck
+
+  test:
+    desc: Unit tests (Vitest; WebCrypto adapters, IndexedDB stores, code routing, frame scheduler)
+    cmds:
+      - pnpm test
+
+  e2e:
+    desc: End-to-end suite — starts a fresh local relay and the Vite app, runs Playwright (Chromium), stops both
+    cmds:
+      - pnpm e2e
+
+  db:migrate:
+    desc: Apply the relay's D1 migrations to its local dev database
+    dir: "{{.RELAY_DIR}}"
+    cmds:
+      - pnpm wrangler d1 migrations apply sealed-meta-dev --local --env dev
+
+  relay:
+    desc: Run the relay locally (wrangler dev, dev env) on http://localhost:8787
+    deps: [db:migrate]
+    dir: "{{.RELAY_DIR}}"
+    cmds:
+      - pnpm wrangler dev --env dev --port 8787
+
+  dev:
+    desc: Run the relay and the web app together (Ctrl-C stops both)
+    deps: [db:migrate]
+    cmds:
+      - task: dev:all
+
+  dev:all:
+    internal: true
+    deps: [relay, web]
+
+  web:
+    desc: Run the Vite dev server on http://localhost:5173
+    cmds:
+      - pnpm dev
+
+  build:
+    desc: Typecheck and build the production bundle into dist/
+    cmds:
+      - pnpm build
+
+  preview:
+    desc: Serve the production build on http://localhost:5173
+    deps: [build]
+    cmds:
+      - pnpm preview
+
+  clean:
+    desc: Remove build output and test artifacts
+    cmds:
+      - rm -rf dist test-results
