@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["SealedKeystoreModule"]
+  },
+  "android": {
+    "modules": ["to.sealed.keystore.SealedKeystoreModule"]
+  }
+}

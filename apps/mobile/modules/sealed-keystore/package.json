@@ -1,0 +1,8 @@
+{
+  "name": "sealed-keystore",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sealed device keys in the Secure Enclave (iOS) and Android Keystore (StrongBox/TEE), gated by biometrics",
+  "main": "index.ts",
+  "types": "index.ts"
+}
