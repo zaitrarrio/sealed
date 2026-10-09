@@ -18,7 +18,7 @@ import type { RgbaImage } from "./types";
 import type { Homography } from "./homography";
 import { CODE_LUT, LINEAR_LUT, sampleCells, type ChannelLut, type CellSamples } from "./sample";
 import { GRAY_RAMP, LINEAR_BACKGROUND, LINEAR_WHITE, SRGB_TO_LINEAR_8, paletteExcess } from "./palette";
-import { GLYPH_FILLS } from "./glyphs";
+import { glyphFills } from "./glyphs";
 import { calibrationLayout, CellKind, type GridLayout } from "./layout";
 import { PIC_BG, PIC_GRAY_BASE, PIC_WHITE } from "./grid";
 import { newSourceGrid, predictFeatures, responseModel, type SourceGrid } from "./model";
@@ -87,8 +87,9 @@ export function setSource(src: SourceGrid, c: number, v: number, centroids: Floa
   if (v >= 0) {
     const k = v >> 4;
     const s = v & 15;
+    const fills = glyphFills(centroids.length / 3);
     for (let q = 0; q < 4; q++) {
-      const fill = GLYPH_FILLS[s * 4 + q] as number;
+      const fill = fills[s * 4 + q] as number;
       for (let ch = 0; ch < 3; ch++) src.q[qo + q * 3 + ch] = fill * (centroids[k * 3 + ch] as number);
     }
     src.f[fo] = 0;
@@ -315,6 +316,7 @@ export function fitChannel(
   const src = sourceFromPicture(pic, n, centroids);
   const pred = predictFeatures(model, src);
   const colors = nominal.length / 3;
+  const tierFills = glyphFills(colors);
   const num = new Float64Array(colors * 3);
   const den = new Float64Array(colors);
   const a = new Float64Array(4);
@@ -325,7 +327,7 @@ export function fitChannel(
     const s = v & 15;
     for (let q = 0; q < 4; q++) {
       let acc = 0;
-      for (let qs = 0; qs < 4; qs++) acc += (model.w0[q * 4 + qs] as number) * (GLYPH_FILLS[s * 4 + qs] as number);
+      for (let qs = 0; qs < 4; qs++) acc += (model.w0[q * 4 + qs] as number) * (tierFills[s * 4 + qs] as number);
       a[q] = acc;
     }
     for (let q = 0; q < 4; q++) {

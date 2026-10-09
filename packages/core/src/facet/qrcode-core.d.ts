@@ -3,7 +3,7 @@
  * instead of the package entry, whose Node build pulls in fs/png renderers that do not exist in browsers,
  * Workers or Hermes.
  */
-declare module "qrcode/lib/core/qrcode" {
+declare module "qrcode/lib/core/qrcode.js" {
   export interface QrBitMatrix {
     readonly size: number;
     /** size × size modules, row-major, 1 = dark. */

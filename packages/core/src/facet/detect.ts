@@ -51,8 +51,15 @@ interface Cluster {
 
 const GRID_SIZES: readonly number[] = Array.from(new Set([TIERS[1].grid, TIERS[2].grid, TIERS[3].grid])).sort((a, b) => a - b);
 const MIN_UNIT_PX = 2.5;
-const MAX_ROW_HITS = 6000;
-const MAX_CLUSTERS = 256;
+/** Largest per-run deviation (in cells) from an anchor template after fitting unit and erosion. */
+const MAX_RUN_ERROR = 0.5;
+/** Binarization windows as divisors of the shorter image side (radius = side / divisor), tried in order. */
+const BIN_WINDOW_DIVISORS: readonly number[] = [64, 20];
+/** Bounds the work on adversarial images (each row hit costs up to four line scans). */
+const MAX_ROW_HITS = 60000;
+const MAX_CLUSTERS = 4096;
+/** Hits after which an anchor cluster stops accepting more (its center is already well averaged). */
+const SATURATED_HITS = 24;
 
 /** Linear luma of an RGBA image. */
 export function linearLuma(img: RgbaImage, out?: Float32Array): LumaPlane {
@@ -122,6 +129,61 @@ class Runs {
   }
 }
 
+/**
+ * Fits the interior runs x_j (alternating dark, light, …, dark) to template t: x_j = t_j·u + s_j·2e, where s_j is
+ * −1 for dark and +1 for light runs. `e` is the binarization erosion of dark bands (blur turns one-cell dark bands
+ * into shallow dips that a local threshold cuts narrower; |2e| ≤ 0.7u). Returns the unit and the worst relative
+ * residual, or null.
+ */
+function fitInterior(r: Runs, first: number, t: readonly number[]): { u: number; err: number; sum: number } | null {
+  const m = t.length;
+  let u: number;
+  let e2 = 0;
+  if (m === 1) {
+    u = (r.len[first] as number) / (t[0] as number);
+  } else {
+    // Least squares in (u, 2e).
+    let suu = 0;
+    let sue = 0;
+    let see = 0;
+    let bu = 0;
+    let be = 0;
+    for (let j = 0; j < m; j++) {
+      const tj = t[j] as number;
+      const sj = j % 2 === 0 ? -1 : 1;
+      const x = r.len[first + j] as number;
+      suu += tj * tj;
+      sue += tj * sj;
+      see += 1;
+      bu += tj * x;
+      be += sj * x;
+    }
+    const det = suu * see - sue * sue;
+    if (!(det > 1e-9)) return null;
+    u = (bu * see - be * sue) / det;
+    e2 = (suu * be - sue * bu) / det;
+    if (!(u > 0)) return null;
+    const lim = 0.7 * u;
+    if (e2 > lim || e2 < -lim) {
+      // Clamp the erosion and refit the unit alone.
+      e2 = Math.max(-lim, Math.min(lim, e2));
+      let num = 0;
+      for (let j = 0; j < m; j++) num += (t[j] as number) * ((r.len[first + j] as number) - (j % 2 === 0 ? -1 : 1) * e2);
+      u = num / suu;
+    }
+  }
+  if (!(u > 0)) return null;
+  let max = 0;
+  let sum = 0;
+  for (let j = 0; j < m; j++) {
+    const pred = (t[j] as number) * u + (j % 2 === 0 ? -1 : 1) * e2;
+    const err = Math.abs((r.len[first + j] as number) - pred) / u;
+    sum += err;
+    if (err > max) max = err;
+  }
+  return { u, err: max, sum };
+}
+
 /** Finds anchor-interior patterns in a run-length encoded line. `lumaAt(i)` gives the line's luma. */
 function findMatches(r: Runs, lumaAt: (i: number) => number, white: number, maxUnit: number, out: Match[]): void {
   const cnt = r.count;
@@ -132,29 +194,26 @@ function findMatches(r: Runs, lumaAt: (i: number) => number, white: number, maxU
       if (last >= cnt) break;
       const a = r.start[i + 1] as number;
       const b = r.start[last] as number;
-      const u = (b - a) / 6;
-      if (u < MIN_UNIT_PX || u > maxUnit) continue;
-      const la = r.len[i] as number;
-      const lb = r.len[last] as number;
-      if (la < 0.45 * u || lb < 0.45 * u || Math.min(la, lb) > 2.2 * u) continue;
+      const span = b - a;
+      if (span < 6 * MIN_UNIT_PX * 0.7 || span > 6 * maxUnit) continue;
       let best: Corner | -1 = -1;
       let bestErr = Infinity;
+      let bestU = 0;
       for (let c = 0; c < 4; c++) {
         const t = ANCHOR_INTERIOR_RUNS[c] as readonly number[];
         if (t.length !== m) continue;
-        let sum = 0;
-        let max = 0;
-        for (let j = 0; j < m; j++) {
-          const e = Math.abs((r.len[i + 1 + j] as number) / u - (t[j] as number));
-          sum += e;
-          if (e > max) max = e;
-        }
-        if (max <= 0.75 && sum < bestErr) {
-          bestErr = sum;
-          best = c as Corner;
-        }
+        const f = fitInterior(r, i + 1, t);
+        if (!f || f.err > MAX_RUN_ERROR || f.sum >= bestErr) continue;
+        bestErr = f.sum;
+        best = c as Corner;
+        bestU = f.u;
       }
       if (best === -1) continue;
+      const u = bestU;
+      if (u < MIN_UNIT_PX || u > maxUnit) continue;
+      const la = r.len[i] as number;
+      const lb = r.len[last] as number;
+      if (la < 0.45 * u || lb < 0.45 * u || Math.min(la, lb) > 2.6 * u) continue;
       // Wide dark runs must be genuinely dark (rejects dim glyph areas in the data region).
       let ok = true;
       for (let j = 0; j < m && ok; j += 2) {
@@ -196,8 +255,24 @@ export class GridDetector {
     const luma = linearLuma(img, this.lumaBuf);
     this.luma = luma;
     const bin = this.binBuf as Uint8Array;
-    const white = this.binarize(luma, bin);
+    const white = this.whiteLevel(luma);
     if (!(white > 0.05)) return [];
+    this.integrate(luma);
+    // Binarization window radii, smallest first: a window about two cells wide keeps the anchors' one-cell dark band
+    // dark under heavy blur; the wider window serves large codes whose cells exceed the small window.
+    const minSide = Math.min(W, H);
+    const radii = Array.from(new Set(BIN_WINDOW_DIVISORS.map((d) => Math.max(4, Math.round(minSide / d)))));
+    for (const radius of radii) {
+      this.binarize(luma, bin, radius, white);
+      const sets = this.scan(luma, bin, white);
+      if (sets.length > 0) return sets;
+    }
+    return [];
+  }
+
+  private scan(luma: LumaPlane, bin: Uint8Array, white: number): CornerSet[] {
+    const W = luma.width;
+    const H = luma.height;
     const maxUnit = Math.max(W, H) / 80;
     const clusters: Cluster[] = [];
     const rowMatches: Match[] = [];
@@ -212,38 +287,50 @@ export class GridDetector {
       for (const m of rowMatches) {
         if (++processed > MAX_ROW_HITS) break;
         const cx = (m.a + m.b) / 2;
-        const v = this.crossCheck(bin, ld, W, H, Math.floor(cx), y + 0.5, m.unit, m.corner, true, white, maxUnit, lineMatches);
+        // Skip rows through an anchor that is already well established (saves the cross-checks).
+        if (nearSaturated(clusters, m.corner, cx, y + 0.5)) continue;
+        const v = this.crossCheck(bin, ld, W, H, cx, y + 0.5, 0, 1, m.unit, m.corner, white, maxUnit, lineMatches);
         if (!v) continue;
-        const h2 = this.crossCheck(bin, ld, W, H, Math.floor(v.center), cx, m.unit, m.corner, false, white, maxUnit, lineMatches);
+        const cy = y + 0.5 + v.offset;
+        const h2 = this.crossCheck(bin, ld, W, H, cx, cy, 1, 0, m.unit, m.corner, white, maxUnit, lineMatches);
         if (!h2) continue;
-        addHit(clusters, m.corner, h2.center, v.center, (m.unit + v.unit + h2.unit) / 3);
+        const fx = cx + h2.offset;
+        // Both diagonals through the center: along any line through the center of concentric squares the run
+        // ratios hold, while glyph data almost never repeats the pattern in all four directions.
+        const d1 = this.crossCheck(bin, ld, W, H, fx, cy, 1, 1, m.unit, m.corner, white, maxUnit, lineMatches);
+        if (!d1) continue;
+        const d2 = this.crossCheck(bin, ld, W, H, fx, cy, 1, -1, m.unit, m.corner, white, maxUnit, lineMatches);
+        if (!d2) continue;
+        addHit(clusters, m.corner, fx, cy, (m.unit + v.unit + h2.unit) / 3);
       }
     }
     return selectCornerSets(clusters);
   }
 
-  /** Binarizes luma against the local mean; returns the image white level (99.5th percentile). */
-  private binarize(l: LumaPlane, bin: Uint8Array): number {
-    const W = l.width;
-    const H = l.height;
+  /** Image white level: 99.5th percentile of luma (subsampled). */
+  private whiteLevel(l: LumaPlane): number {
     const d = l.data;
     const hist = new Uint32Array(1024);
     let total = 0;
     for (let i = 0; i < d.length; i += 3) {
       const v = d[i] as number;
-      const bin = Math.min(1023, Math.max(0, Math.floor(v * 1023)));
-      hist[bin] = (hist[bin] as number) + 1;
+      const b = Math.min(1023, Math.max(0, Math.floor(v * 1023)));
+      hist[b] = (hist[b] as number) + 1;
       total++;
     }
     let acc = 0;
-    let white = 1;
     for (let b = 1023; b >= 0; b--) {
       acc += hist[b] as number;
-      if (acc >= total * 0.005) {
-        white = b / 1023;
-        break;
-      }
+      if (acc >= total * 0.005) return b / 1023;
     }
+    return 1;
+  }
+
+  /** Summed-area table of the luma plane. */
+  private integrate(l: LumaPlane): void {
+    const W = l.width;
+    const H = l.height;
+    const d = l.data;
     const S = this.integral as Float64Array;
     const W1 = W + 1;
     for (let x = 0; x <= W; x++) S[x] = 0;
@@ -255,8 +342,20 @@ export class GridDetector {
         S[y * W1 + x] = (S[(y - 1) * W1 + x] as number) + row;
       }
     }
-    const R = Math.max(6, Math.round(Math.min(W, H) / 20));
+  }
+
+  /**
+   * Binarizes luma against the local mean over a (2R+1)² window, with an absolute floor relative to the white level
+   * (uniform dark areas stay dark) and a small bias below the mean (uniform light areas stay light under noise).
+   */
+  private binarize(l: LumaPlane, bin: Uint8Array, R: number, white: number): void {
+    const W = l.width;
+    const H = l.height;
+    const d = l.data;
+    const S = this.integral as Float64Array;
+    const W1 = W + 1;
     const floor = 0.12 * white;
+    const bias = 0.04 * white;
     for (let y = 0; y < H; y++) {
       const y0 = Math.max(0, y - R);
       const y1 = Math.min(H, y + R + 1);
@@ -266,53 +365,62 @@ export class GridDetector {
         const sum = (S[y1 * W1 + x1] as number) - (S[y0 * W1 + x1] as number) - (S[y1 * W1 + x0] as number) + (S[y0 * W1 + x0] as number);
         const mean = sum / ((x1 - x0) * (y1 - y0));
         const v = d[y * W + x] as number;
-        bin[y * W + x] = v > mean && v > floor ? 1 : 0;
+        bin[y * W + x] = v > mean - bias && v > floor ? 1 : 0;
       }
     }
-    return white;
   }
 
   /**
-   * Scans a column (vertical = true, at x = `line`) or a row (at y = `line`) around position `at` and returns the
-   * center of the matching pattern of the same corner type whose interior contains `at`.
+   * Samples the binarized image along the line through (x, y) with direction (dx, dy) ∈ {(1,0), (0,1), (1,±1)},
+   * one sample per step, and returns the offset (in steps from (x, y)) of the center of the matching pattern of the
+   * same corner type whose interior contains (x, y). Along a diagonal, one step changes the Chebyshev distance
+   * from an axis-aligned anchor's center by one pixel, so run lengths in steps compare directly with `unit`.
    */
   private crossCheck(
     bin: Uint8Array,
     luma: Float32Array,
     W: number,
     H: number,
-    line: number,
-    at: number,
+    x: number,
+    y: number,
+    dx: number,
+    dy: number,
     unit: number,
     corner: Corner,
-    vertical: boolean,
     white: number,
     maxUnit: number,
     matches: Match[],
-  ): { center: number; unit: number } | null {
-    const extent = vertical ? H : W;
-    if (line < 0 || line >= (vertical ? W : H)) return null;
+  ): { offset: number; unit: number } | null {
     const span = Math.ceil(9 * unit);
-    const s0 = Math.max(0, Math.floor(at - span));
-    const s1 = Math.min(extent, Math.ceil(at + span));
-    const len = s1 - s0;
-    if (len < 8) return null;
+    const len = 2 * span + 1;
     if (this.colBin.length < len) {
       this.colBin = new Uint8Array(len);
       this.colLuma = new Float32Array(len);
     }
+    let first = -1;
+    let count = 0;
     for (let i = 0; i < len; i++) {
-      const idx = vertical ? (s0 + i) * W + line : line * W + s0 + i;
-      this.colBin[i] = bin[idx] as number;
-      this.colLuma[i] = luma[idx] as number;
+      const t = i - span;
+      const px = Math.floor(x + dx * t);
+      const py = Math.floor(y + dy * t);
+      if (px < 0 || py < 0 || px >= W || py >= H) {
+        if (first >= 0) break;
+        continue;
+      }
+      if (first < 0) first = i;
+      const idx = py * W + px;
+      this.colBin[count] = bin[idx] as number;
+      this.colLuma[count] = luma[idx] as number;
+      count++;
     }
-    this.lineRuns.encode(this.colBin, 0, 1, len);
+    if (count < 8 || first < 0) return null;
+    this.lineRuns.encode(this.colBin, 0, 1, count);
     matches.length = 0;
     const cl = this.colLuma;
     findMatches(this.lineRuns, (i) => cl[i] as number, white, maxUnit, matches);
     let best: Match | null = null;
     let bestD = Infinity;
-    const rel = at - s0;
+    const rel = span - first + 0.5;
     for (const m of matches) {
       if (m.corner !== corner || rel < m.a || rel > m.b) continue;
       if (m.unit < unit / 1.8 || m.unit > unit * 1.8) continue;
@@ -323,8 +431,20 @@ export class GridDetector {
       }
     }
     if (!best || bestD > 1.5 * best.unit) return null;
-    return { center: s0 + (best.a + best.b) / 2, unit: best.unit };
+    return { offset: (best.a + best.b) / 2 - rel, unit: best.unit };
   }
+}
+
+/** True when a cluster of this corner near (x, y) already holds enough hits to be certain. */
+function nearSaturated(clusters: Cluster[], corner: Corner, x: number, y: number): boolean {
+  for (const c of clusters) {
+    if (c.corner !== corner || c.w < SATURATED_HITS) continue;
+    const cu = c.su / c.w;
+    const dx = c.sx / c.w - x;
+    const dy = c.sy / c.w - y;
+    if (dx * dx + dy * dy <= 4 * cu * cu) return true;
+  }
+  return false;
 }
 
 function addHit(clusters: Cluster[], corner: Corner, x: number, y: number, u: number): void {

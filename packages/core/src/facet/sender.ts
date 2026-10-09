@@ -44,7 +44,7 @@ export interface FacetSenderOptions {
   interleaveCompatible?: boolean;
   /** Broadcast: repeat forever and set the loop flag. */
   loop?: boolean;
-  /** Finite streams: repair symbols sent after the source phase, as a fraction of K per block (default 0.5). */
+  /** Optional finite budget: repair symbols sent after the source phase, as a fraction of K per block. Default: unlimited (spec §7.5). */
   repairFraction?: number;
   /**
    * Signature for the interleaved T0 descriptor. A Broadcast signature binds the descriptor's own OTI, and the T0
@@ -236,7 +236,9 @@ export class FacetSender {
     if (this.streamId.length !== 4) throw new RangeError("streamId must be 4 bytes");
     this.tier = opts.tier;
     const loop = opts.loop === true;
-    const repairFraction = opts.repairFraction ?? 0.5;
+    // Spec §7.5: after the source symbols, repair symbols continue indefinitely until the user stops the stream.
+    // A finite budget is opt-in (fixtures, recordings).
+    const repairFraction = opts.repairFraction ?? Number.POSITIVE_INFINITY;
     this.primary = new TierStream(opts.tier, opts.envelope, this.streamId, opts.descriptor, loop, repairFraction);
     this.descriptor = this.primary.descriptor;
     if (opts.interleaveCompatible && opts.tier !== 0) {

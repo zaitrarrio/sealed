@@ -29,10 +29,14 @@ import { sampleCells } from "./sample";
 import { correctFeatures, setSource, WHITE_EXCESS, type ChannelCalibration } from "./calibrate";
 import { cellsOfByte, cellsToStream, CellKind, type GridLayout } from "./layout";
 import { HEADER_BITS, decodeHeaderStrip, headerCrcMatches, parseFrameHeader, type FrameHeader } from "./header";
-import { decodeStream, frameMask, paddingCells, PIC_BG, PIC_WHITE, streamCells, stripBits } from "./grid";
-import { GLYPH_FILLS } from "./glyphs";
-import { newSourceGrid, predictFeatures, responseModel, selfFeatures, type ResponseModel, type SourceGrid } from "./model";
+import { decodeStream, frameMask, paddingCells, PIC_BG, PIC_WHITE, streamCells, stripBits, type DecodedCodewords, type StreamDecodeResult } from "./grid";
+import { meanFill } from "./glyphs";
+import { adjointFeatures, edgeClass, EDGE_CLASSES, newSourceGrid, predictFeatures, responseModel, spreadGrams, type ResponseModel, type SourceGrid } from "./model";
 import type { GridTier } from "./tiers";
+import { detectFromStats, epDetect } from "./equalize";
+import { vampDetect } from "./vamp";
+const VAMP_ITERATIONS = Number((globalThis as any).process?.env?.VIT ?? 12);
+const VAMP_DAMPING = Number((globalThis as any).process?.env?.VD ?? 0.5);
 
 const WHITE_NORM2 = WHITE_EXCESS[0] * WHITE_EXCESS[0] + WHITE_EXCESS[1] * WHITE_EXCESS[1] + WHITE_EXCESS[2] * WHITE_EXCESS[2];
 const DFE_PASSES = 3;
@@ -45,14 +49,20 @@ export interface Observation {
   readonly valid: Uint8Array;
   readonly model: ResponseModel;
   readonly centroids: Float32Array;
+  /** Per-component noise variance of the corrected features (from the calibration fit residual). */
+  readonly noiseVariance: number;
 }
+
+/** Noise variance assumed before a calibration frame has measured it (≈ σ 6 code values on mid-gray). */
+const DEFAULT_NOISE_VARIANCE = 1e-4;
 
 export function observe(img: RgbaImage, h: Homography, layout: GridLayout, cal: ChannelCalibration, centroids: Float32Array): Observation | null {
   const s = sampleCells(img, h, layout.n, cal.lut);
   let valid = 0;
   for (let i = 0; i < s.valid.length; i++) valid += s.valid[i] as number;
   if (valid < s.valid.length * 0.98) return null;
-  return { layout, feat: correctFeatures(s, cal.x), valid: s.valid, model: responseModel(cal.sigma), centroids };
+  const noiseVariance = Number.isFinite(cal.rms) && cal.rms > 0 ? Math.max((cal.rms * cal.rms * WHITE_NORM2) / 3, 1e-6) : DEFAULT_NOISE_VARIANCE;
+  return { layout, feat: correctFeatures(s, cal.x), valid: s.valid, model: responseModel(cal.sigma), centroids, noiseVariance };
 }
 
 /** Known structure: anchors light/dark, everything else background (zero). */
@@ -81,8 +91,6 @@ function meanOf(centroids: Float32Array): Float32Array {
   return m;
 }
 
-let MEAN_FILL = 0;
-for (let i = 0; i < GLYPH_FILLS.length; i++) MEAN_FILL += (GLYPH_FILLS[i] as number) / GLYPH_FILLS.length;
 
 export interface HeaderCandidate {
   readonly bytes: Uint8Array;
@@ -90,42 +98,102 @@ export interface HeaderCandidate {
   readonly strip: "top" | "bottom";
 }
 
-/** Decodes both header strips. Returns the distinct valid headers (top first). */
-export function decodeHeaders(obs: Observation): HeaderCandidate[] {
+export interface StripDecisions {
+  /** Hard bits per strip (top, bottom), strip bit order. */
+  readonly bits: readonly Uint8Array[];
+  /** Per-bit reliability (distance of the matched-filter level from the threshold, in white-cell units). */
+  readonly conf: readonly Float32Array[];
+}
+
+const HEADER_PASSES = 4;
+
+/**
+ * Soft decision-feedback detection of both header strips (spec §7.6 step 3).
+ *
+ * Every strip cell is a full black/white cell. The observation of cell c is predicted from all known sources
+ * (anchors; filler bits; data cells at their expected mean) plus the current soft estimates of the other strip
+ * cells; the residual is matched-filtered against the cell's own response and gives its level ℓ ∈ ≈[0, 1]. The
+ * soft estimate fed back is a clipped ℓ (soft values stop a wrong early decision from propagating), and the last
+ * pass makes the hard decisions. The two strips are detected jointly because they are far apart (no interaction),
+ * which keeps one prediction per pass.
+ */
+export function headerStripDecisions(obs: Observation): StripDecisions {
   const layout = obs.layout;
   const n = layout.n;
   const src = baseSource(layout, obs.centroids);
   const meanColor = meanOf(obs.centroids);
-  for (let c = 0; c < n * n; c++) if (layout.kind[c] === CellKind.Data) setMeanSource(src, c, MEAN_FILL, meanColor);
+  const fillMean = meanFill(obs.centroids.length / 3);
+  for (let c = 0; c < n * n; c++) if (layout.kind[c] === CellKind.Data) setMeanSource(src, c, fillMean, meanColor);
   const strips = [layout.headerTop, layout.headerBottom];
-  const bits = strips.map((s) => new Uint8Array(s.length));
-  const conf = strips.map((s) => new Float32Array(s.length));
-  const self = new Float32Array(12);
-  const whiteSelf = (obs.model.wf0[0] as number + (obs.model.wf0[1] as number) + (obs.model.wf0[2] as number) + (obs.model.wf0[3] as number)) / 4;
-  const fixedFiller = (i: number): number => i & 1;
-  for (let pass = 0; pass < 3; pass++) {
-    const pred = pass === 0 ? null : predictFeatures(obs.model, src);
+  const len = layout.headerTop.length;
+  const bits = strips.map(() => new Uint8Array(len));
+  const conf = strips.map(() => new Float32Array(len));
+  const soft = strips.map(() => new Float32Array(len).fill(0.5));
+  // Filler bits after the RS codeword are known.
+  for (const sv of soft) for (let i = HEADER_BITS; i < len; i++) sv[i] = i & 1;
+  const wf0 = obs.model.wf0;
+  let wNorm = 0;
+  for (let q = 0; q < 4; q++) wNorm += (wf0[q] as number) * (wf0[q] as number);
+  const setLevel = (c: number, level: number): void => {
+    for (let ch = 0; ch < 3; ch++) src.f[c * 3 + ch] = level * (WHITE_EXCESS[ch] as number);
+  };
+  strips.forEach((cells, si) => {
+    for (let i = 0; i < len; i++) setLevel(cells[i] as number, (soft[si] as Float32Array)[i] as number);
+  });
+  const pred = new Float32Array(n * n * 12);
+  for (let pass = 0; pass < HEADER_PASSES; pass++) {
+    predictFeatures(obs.model, src, pred);
+    const last = pass === HEADER_PASSES - 1;
+    const newSoft = strips.map(() => new Float32Array(len));
     strips.forEach((cells, si) => {
-      for (let i = 0; i < cells.length; i++) {
+      const sv = soft[si] as Float32Array;
+      const ns = newSoft[si] as Float32Array;
+      for (let i = 0; i < len; i++) {
+        if (i >= HEADER_BITS) {
+          ns[i] = i & 1;
+          continue;
+        }
         const c = cells[i] as number;
+        const own = sv[i] as number;
         let acc = 0;
-        if (pred) selfFeatures(obs.model, src, c, self);
         for (let q = 0; q < 4; q++) {
+          let dot = 0;
           for (let ch = 0; ch < 3; ch++) {
             const o = c * 12 + q * 3 + ch;
-            const r = (obs.feat[o] as number) - (pred ? (pred[o] as number) - (self[q * 3 + ch] as number) : 0);
-            acc += r * (WHITE_EXCESS[ch] as number);
+            const r = (obs.feat[o] as number) - (pred[o] as number) + (wf0[q] as number) * own * (WHITE_EXCESS[ch] as number);
+            dot += r * (WHITE_EXCESS[ch] as number);
           }
+          acc += (wf0[q] as number) * dot;
         }
-        const level = acc / 4 / WHITE_NORM2; // fraction of a fully lit, isolated cell
-        const thr = pred ? whiteSelf / 2 : 0.5 * whiteSelf;
-        const bit = i >= HEADER_BITS ? fixedFiller(i) : level > thr ? 1 : 0;
-        (bits[si] as Uint8Array)[i] = bit;
-        (conf[si] as Float32Array)[i] = i >= HEADER_BITS ? Infinity : Math.abs(level - thr);
+        const level = acc / (wNorm * WHITE_NORM2);
+        ns[i] = Math.min(1, Math.max(0, level));
+        if (last) {
+          (bits[si] as Uint8Array)[i] = level > 0.5 ? 1 : 0;
+          (conf[si] as Float32Array)[i] = Math.abs(level - 0.5);
+        }
       }
-      for (let i = 0; i < cells.length; i++) setSource(src, cells[i] as number, (bits[si] as Uint8Array)[i] ? PIC_WHITE : PIC_BG, obs.centroids);
+    });
+    if (last) break;
+    // Sharpen the soft estimates progressively toward hard decisions.
+    const gain = 1 + pass;
+    strips.forEach((cells, si) => {
+      const ns = newSoft[si] as Float32Array;
+      const sv = soft[si] as Float32Array;
+      for (let i = 0; i < len; i++) {
+        const v = i >= HEADER_BITS ? (ns[i] as number) : Math.min(1, Math.max(0, 0.5 + gain * ((ns[i] as number) - 0.5)));
+        sv[i] = v;
+        setLevel(cells[i] as number, v);
+      }
     });
   }
+  for (const b of bits) for (let i = HEADER_BITS; i < len; i++) b[i] = i & 1;
+  for (const cf of conf) for (let i = HEADER_BITS; i < len; i++) cf[i] = Infinity;
+  return { bits, conf };
+}
+
+/** Decodes both header strips. Returns the distinct valid headers (top first). */
+export function decodeHeaders(obs: Observation): HeaderCandidate[] {
+  const { bits, conf } = headerStripDecisions(obs);
   const out: HeaderCandidate[] = [];
   (["top", "bottom"] as const).forEach((name, si) => {
     const b = decodeHeaderStrip(bits[si] as Uint8Array, conf[si] as Float32Array);
@@ -140,9 +208,9 @@ export function decodeHeaders(obs: Observation): HeaderCandidate[] {
 
 /** Sufficient statistics of one or more captures of the same frame (for temporal fusion). */
 export interface FusionStats {
-  /** Σ W0ᵀ r / σ² per used data cell (permutation order): [p * 12 + q * 3 + ch]. */
+  /** Σ Wᵀ r / σ² per used data cell (permutation order): [p * 12 + q * 3 + ch]. */
   readonly b: Float32Array;
-  /** Σ W0ᵀ W0 / σ² (4 × 4). */
+  /** Σ WᵀW / σ² per edge class (EDGE_CLASSES² × 16). */
   readonly m: Float64Array;
   captures: number;
 }
@@ -154,83 +222,16 @@ export interface DataDecodeResult {
   readonly codewordFraction: number;
 }
 
-interface Detector {
-  /** e[s * K + k] = fill_sᵀ M fill_s · |c_k|². */
-  readonly e: Float32Array;
-  readonly centroids: Float32Array;
-  readonly k: number;
-}
-
-function makeDetector(m: Float64Array, centroids: Float32Array, colors: number): Detector {
-  const e = new Float32Array(16 * colors);
-  for (let s = 0; s < 16; s++) {
-    let quad = 0;
-    for (let a = 0; a < 4; a++) {
-      for (let b = 0; b < 4; b++) quad += (GLYPH_FILLS[s * 4 + a] as number) * (m[a * 4 + b] as number) * (GLYPH_FILLS[s * 4 + b] as number);
-    }
-    for (let k = 0; k < colors; k++) {
-      const c0 = centroids[k * 3] as number;
-      const c1 = centroids[k * 3 + 1] as number;
-      const c2 = centroids[k * 3 + 2] as number;
-      e[s * colors + k] = quad * (c0 * c0 + c1 * c1 + c2 * c2);
-    }
+/** Edge class index (cy * EDGE_CLASSES + cx) of every grid cell. */
+const classCache = new Map<number, Uint8Array>();
+function cellClasses(n: number): Uint8Array {
+  let c = classCache.get(n);
+  if (!c) {
+    c = new Uint8Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) c[y * n + x] = edgeClass(y, n) * EDGE_CLASSES + edgeClass(x, n);
+    classCache.set(n, c);
   }
-  return { e, centroids, k: colors };
-}
-
-/** ML decision from statistic b (12 floats at offset). Returns symbol and margin (2nd best − best score). */
-function detect(det: Detector, b: Float32Array, off: number, dots: Float32Array): { sym: number; margin: number; best: number } {
-  const K = det.k;
-  const c = det.centroids;
-  for (let q = 0; q < 4; q++) {
-    const b0 = b[off + q * 3] as number;
-    const b1 = b[off + q * 3 + 1] as number;
-    const b2 = b[off + q * 3 + 2] as number;
-    for (let k = 0; k < K; k++) dots[q * K + k] = b0 * (c[k * 3] as number) + b1 * (c[k * 3 + 1] as number) + b2 * (c[k * 3 + 2] as number);
-  }
-  let best = Infinity;
-  let second = Infinity;
-  let sym = 0;
-  for (let s = 0; s < 16; s++) {
-    const f0 = GLYPH_FILLS[s * 4] as number;
-    const f1 = GLYPH_FILLS[s * 4 + 1] as number;
-    const f2 = GLYPH_FILLS[s * 4 + 2] as number;
-    const f3 = GLYPH_FILLS[s * 4 + 3] as number;
-    for (let k = 0; k < K; k++) {
-      const score = (det.e[s * K + k] as number) - 2 * (f0 * (dots[k] as number) + f1 * (dots[K + k] as number) + f2 * (dots[2 * K + k] as number) + f3 * (dots[3 * K + k] as number));
-      if (score < best) {
-        second = best;
-        best = score;
-        sym = k * 16 + s;
-      } else if (score < second) {
-        second = score;
-      }
-    }
-  }
-  return { sym, margin: second - best, best };
-}
-
-/** W0ᵀ r for one cell's residual (12 floats) into out at offset. */
-function projectResidual(w0: Float64Array, r: Float32Array, out: Float32Array, off: number, scale: number): void {
-  for (let a = 0; a < 4; a++) {
-    for (let ch = 0; ch < 3; ch++) {
-      let acc = 0;
-      for (let q = 0; q < 4; q++) acc += (w0[q * 4 + a] as number) * (r[q * 3 + ch] as number);
-      out[off + a * 3 + ch] = acc * scale;
-    }
-  }
-}
-
-function gram(w0: Float64Array, scale: number): Float64Array {
-  const m = new Float64Array(16);
-  for (let a = 0; a < 4; a++) {
-    for (let b = 0; b < 4; b++) {
-      let acc = 0;
-      for (let q = 0; q < 4; q++) acc += (w0[q * 4 + a] as number) * (w0[q * 4 + b] as number);
-      m[a * 4 + b] = acc * scale;
-    }
-  }
-  return m;
+  return c;
 }
 
 /** Bits → whitened stream and per-byte confidence from per-cell margins (permutation order). */
@@ -245,6 +246,14 @@ function cellsToStreamWithConf(layout: GridLayout, sym: Uint8Array, margin: Floa
   return { stream, conf };
 }
 
+/** EP detection schedule (equalize.ts). */
+const EP_ROUNDS = 6;
+const EP_CG_ITERATIONS: readonly number[] = [24, 10];
+const EP_DAMPING = 0.5;
+const EP_CG_TOLERANCE = 1e-6;
+/** Early decode attempts within the first round (CG iterations). */
+const EP_CHECKPOINTS: readonly number[] = [6, 10, 14, 18];
+
 /**
  * Decodes the data region of a frame (data, descriptor or end) under `header`. `prior` holds fusion statistics
  * from earlier failed captures of the same frame.
@@ -254,15 +263,13 @@ export function decodeData(obs: Observation, candidate: HeaderCandidate, prior: 
   const n = layout.n;
   const h = candidate.header;
   const tier = h.tier as GridTier;
-  const colors = obs.centroids.length / 3;
   const id = { streamId: h.streamId, tier, type: h.type, sbn: h.sbn, esi: h.esi };
   const { mask } = frameMask(layout, id);
   const used = layout.cellsUsed;
   const order = layout.dataOrder;
 
-  // Known sources: anchors, both header strips (from the decoded header), padding pilots.
+  // Known sources: anchors, both header strips (from the decoded header), padding pilots. Unknown cells are zero.
   const src = baseSource(layout, obs.centroids);
-  const meanColor = meanOf(obs.centroids);
   const stripBitsTop = stripBits(layout, candidate.bytes);
   for (let i = 0; i < layout.headerTop.length; i++) {
     const v = stripBitsTop[i] ? PIC_WHITE : PIC_BG;
@@ -271,60 +278,67 @@ export function decodeData(obs: Observation, candidate: HeaderCandidate, prior: 
   }
   const pad = paddingCells(layout, id);
   for (let p = used; p < order.length; p++) setSource(src, order[p] as number, pad[p - used] as number, obs.centroids);
-  const known = new Uint8Array(used);
-  for (let p = 0; p < used; p++) setMeanSource(src, order[p] as number, MEAN_FILL, meanColor);
 
-  const w0 = obs.model.w0;
-  const det = makeDetector(gram(w0, 1), obs.centroids, colors);
+  const grams = spreadGrams(obs.model, n);
+  const classes = cellClasses(n);
+  const s2 = obs.noiseVariance;
+  const known = new Uint8Array(used);
   const sym = new Uint8Array(used);
   const margin = new Float32Array(used);
-  const best = new Float32Array(used);
-  const dots = new Float32Array(4 * colors);
-  const r = new Float32Array(12);
-  const self = new Float32Array(12);
-  const bstat = new Float32Array(used * 12);
   let lastStats: FusionStats | null = null;
   let okFraction = 0;
-  let decodedMask: Uint8Array | null = null;
+  let decoded: DecodedCodewords | null = null;
+  let payload: Uint8Array | null = null;
 
   for (let round = 0; round <= TURBO_ROUNDS; round++) {
-    for (let pass = 0; pass < DFE_PASSES; pass++) {
-      const pred = predictFeatures(obs.model, src);
-      for (let p = 0; p < used; p++) {
-        if (known[p]) continue;
-        const c = order[p] as number;
-        selfFeatures(obs.model, src, c, self);
-        for (let i = 0; i < 12; i++) r[i] = (obs.feat[c * 12 + i] as number) - (pred[c * 12 + i] as number) + (self[i] as number);
-        projectResidual(w0, r, bstat, p * 12, 1);
-        const d = detect(det, bstat, p * 12, dots);
-        sym[p] = d.sym;
-        margin[p] = d.margin;
-        best[p] = d.best;
-      }
-      // Feed decisions back: confident cells hard in the first pass, all cells afterwards.
-      let medianMargin = 0;
-      if (pass === 0) medianMargin = median(margin, known);
-      for (let p = 0; p < used; p++) {
-        if (known[p]) continue;
-        const c = order[p] as number;
-        if (pass === 0 && (margin[p] as number) < medianMargin * 0.5) setMeanSource(src, c, MEAN_FILL, meanColor);
-        else setSource(src, c, sym[p] as number, obs.centroids);
-      }
+    const positions: number[] = [];
+    for (let p = 0; p < used; p++) if (!known[p]) positions.push(p);
+    const cells = Int32Array.from(positions, (p) => order[p] as number);
+    const pred = predictFeatures(obs.model, src);
+    const y = new Float32Array(pred.length);
+    for (let i = 0; i < y.length; i++) {
+      const v = (obs.feat[i] as number) - (pred[i] as number);
+      y[i] = v === v ? v : 0;
     }
-    // Inner code.
-    const { stream, conf } = cellsToStreamWithConf(layout, sym, knownMargins(margin, known));
-    const res = decodeStream(layout, stream, mask, conf, undefined, decodedMask ?? undefined);
-    okFraction = res.ok.reduce((a, v) => a + v, 0) / layout.codewords;
-    if (res.payload) return { payload: res.payload, stats: null, codewordFraction: 1 };
+    let res: StreamDecodeResult | null = null;
+    const tryDecode = (aSym: Uint8Array, aMargin: Float32Array, maxFailures: number): StreamDecodeResult => {
+      for (let i = 0; i < positions.length; i++) {
+        const p = positions[i] as number;
+        sym[p] = aSym[i] as number;
+        margin[p] = aMargin[i] as number;
+      }
+      const { stream, conf } = cellsToStreamWithConf(layout, sym, knownMargins(margin, known));
+      return decodeStream(layout, stream, mask, conf, undefined, decoded ?? undefined, maxFailures);
+    };
+    const ep = vampDetect(
+      { n, model: obs.model, y, cells, centroids: obs.centroids, noiseVariance: s2 },
+      {
+        iterations: VAMP_ITERATIONS,
+        damping: VAMP_DAMPING,
+        onIteration: (r, aSym, aMargin) => {
+          const last = r === VAMP_ITERATIONS - 1;
+          const attempt = tryDecode(aSym, aMargin, last ? Infinity : 1);
+          if (attempt.payload || last) res = attempt;
+          return attempt.payload !== null;
+        },
+      },
+    );
+    if (!res) res = tryDecode(ep.sym, ep.margin, Infinity);
+    const result: StreamDecodeResult = res;
+    okFraction = result.ok.reduce((a, v) => a + v, 0) / layout.codewords;
+    if (result.payload) {
+      payload = result.payload;
+      break;
+    }
 
-    // Fusion statistics are normalized by this capture's noise variance (median squared model residual).
+    // Fusion statistics (first round: every used cell is in the problem).
     if (round === 0) {
-      const sigma2 = estimateNoise(obs, src, order, used, known);
-      const scale = 1 / Math.max(sigma2, 1e-8);
       const b = new Float32Array(used * 12);
-      for (let i = 0; i < b.length; i++) b[i] = (bstat[i] as number) * scale;
-      lastStats = { b, m: gram(w0, scale), captures: 1 };
-      if (prior && prior.b.length === b.length) {
+      for (let i = 0; i < positions.length; i++) void i;
+      const m = new Float64Array(grams.length);
+      for (let i = 0; i < m.length; i++) m[i] = (grams[i] as number) / s2;
+      lastStats = { b, m, captures: 1 };
+      if (prior && prior.b.length === b.length && prior.m.length === m.length) {
         const fused = fuseStats(prior, lastStats);
         const out = decodeFromStats(layout, fused, obs.centroids, mask);
         if (out) return { payload: out, stats: null, codewordFraction: 1 };
@@ -333,21 +347,19 @@ export function decodeData(obs: Observation, candidate: HeaderCandidate, prior: 
     }
     if (okFraction === 0 || round === TURBO_ROUNDS) break;
     // Turbo: cells whose bits come only from decoded codewords become known sources.
-    const cellsNow = streamCells(layout, res.stream);
-    const cwOk = res.ok;
+    const cellsNow = streamCells(layout, result.stream);
     let gained = 0;
     for (let p = 0; p < used; p++) {
-      if (known[p]) continue;
-      if (cellFromDecodedCodewords(p, layout, cwOk)) {
-        known[p] = 1;
-        sym[p] = cellsNow[p] as number;
-        setSource(src, order[p] as number, sym[p] as number, obs.centroids);
-        gained++;
-      }
+      if (known[p] || !cellFromDecodedCodewords(p, layout, result.ok)) continue;
+      known[p] = 1;
+      sym[p] = cellsNow[p] as number;
+      setSource(src, order[p] as number, sym[p] as number, obs.centroids);
+      gained++;
     }
-    decodedMask = cwOk;
+    decoded = { ok: result.ok, stream: result.stream };
     if (gained === 0) break;
   }
+  if (payload) return { payload, stats: null, codewordFraction: 1 };
   return { payload: null, stats: lastStats, codewordFraction: okFraction };
 }
 
@@ -374,47 +386,39 @@ function median(values: Float32Array, skip: Uint8Array): number {
   return v[v.length >> 1] as number;
 }
 
-/** Per-feature noise variance from residuals against the current decisions. */
-function estimateNoise(obs: Observation, src: SourceGrid, order: Int32Array, used: number, known: Uint8Array): number {
+/** Per-feature noise variance from residuals against the current decisions (median: robust to wrong decisions). */
+function estimateNoise(obs: Observation, src: SourceGrid, order: Int32Array, used: number): number {
   const pred = predictFeatures(obs.model, src);
   const errs: number[] = [];
   for (let p = 0; p < used; p += 5) {
-    if (known[p]) continue;
     const c = order[p] as number;
     let e = 0;
     for (let i = 0; i < 12; i++) {
       const d = (obs.feat[c * 12 + i] as number) - (pred[c * 12 + i] as number);
       e += d * d;
     }
-    errs.push(e / 12);
+    if (Number.isFinite(e)) errs.push(e / 12);
   }
   if (errs.length === 0) return 1e-4;
   errs.sort((a, b) => a - b);
-  // Median is robust to the minority of wrong decisions.
   return Math.max(1e-7, errs[errs.length >> 1] as number);
 }
 
 export function fuseStats(a: FusionStats, b: FusionStats): FusionStats {
   const out = new Float32Array(a.b.length);
   for (let i = 0; i < out.length; i++) out[i] = (a.b[i] as number) + (b.b[i] as number);
-  const m = new Float64Array(16);
-  for (let i = 0; i < 16; i++) m[i] = (a.m[i] as number) + (b.m[i] as number);
+  const m = new Float64Array(a.m.length);
+  for (let i = 0; i < m.length; i++) m[i] = (a.m[i] as number) + (b.m[i] as number);
   return { b: out, m, captures: a.captures + b.captures };
 }
 
 /** Decodes a payload from (fused) sufficient statistics without interference re-estimation. */
 function decodeFromStats(layout: GridLayout, stats: FusionStats, centroids: Float32Array, mask: Uint8Array): Uint8Array | null {
   const used = layout.cellsUsed;
-  const colors = centroids.length / 3;
-  const det = makeDetector(stats.m, centroids, colors);
-  const sym = new Uint8Array(used);
-  const margin = new Float32Array(used);
-  const dots = new Float32Array(4 * colors);
-  for (let p = 0; p < used; p++) {
-    const d = detect(det, stats.b, p * 12, dots);
-    sym[p] = d.sym;
-    margin[p] = d.margin;
-  }
+  const classes = cellClasses(layout.n);
+  const entryClasses = new Uint8Array(used);
+  for (let p = 0; p < used; p++) entryClasses[p] = classes[layout.dataOrder[p] as number] as number;
+  const { sym, margin } = detectFromStats(stats.b, stats.m, entryClasses, centroids);
   const { stream, conf } = cellsToStreamWithConf(layout, sym, margin);
   return decodeStream(layout, stream, mask, conf).payload;
 }

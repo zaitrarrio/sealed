@@ -19,12 +19,13 @@ export function cellSizeFor(sizePx: number, n: number, quiet = QUIET_CELLS): num
   return Math.floor(sizePx / (n + 2 * quiet));
 }
 
-const tileCache = new Map<number, Float32Array[]>();
-function tiles(cellPx: number): Float32Array[] {
-  let t = tileCache.get(cellPx);
+const tileCache = new Map<string, Float32Array[]>();
+function tiles(cellPx: number, colors: number): Float32Array[] {
+  const key = `${cellPx}/${colors}`;
+  let t = tileCache.get(key);
   if (!t) {
-    t = glyphTiles(cellPx);
-    tileCache.set(cellPx, t);
+    t = glyphTiles(cellPx, colors);
+    tileCache.set(key, t);
   }
   return t;
 }
@@ -36,7 +37,7 @@ function glyphPixels(tier: GridTier, cellPx: number): Uint8Array[] {
   const hit = glyphPixelCache.get(key);
   if (hit) return hit;
   const pal = paletteFor(tier).map(linear);
-  const ts = tiles(cellPx);
+  const ts = tiles(cellPx, pal.length);
   const out: Uint8Array[] = [];
   for (const c of pal) {
     for (let s = 0; s < GLYPH_COUNT; s++) {

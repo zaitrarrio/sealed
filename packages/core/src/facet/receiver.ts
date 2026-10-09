@@ -14,10 +14,11 @@ import { RaptorQDecoder, decodeOti } from "../fec/index";
 import { ctEqual } from "../bytes";
 import type { CapabilityMeasurement, ReceiveProgress, RgbaImage, StreamDescriptor, Tier } from "./types";
 import { TIERS, type GridTier } from "./tiers";
-import { GridDetector, gridHomography, gridSizesFor, pixelsPerCell } from "./detect";
+import { GridDetector, gridHomography, gridSizesFor, pixelsPerCell, type LumaPlane } from "./detect";
+import { anchorPoints, refineHomography } from "./refine";
 import { gridLayout, gridTierForSize } from "./layout";
 import { calibrationPicture } from "./grid";
-import { anchorCalibration, defaultCalibration, fitChannel, type ChannelCalibration } from "./calibrate";
+import { anchorCalibration, defaultCalibration, fitChannel, DEFAULT_SIGMA, type ChannelCalibration } from "./calibrate";
 import { decodeData, decodeHeaders, observe, type FusionStats, type HeaderCandidate } from "./decode";
 import { decodeDescriptorPayload } from "./descriptor";
 import { HEADER_BYTES, headerCrcMatches, parseFrameHeader, type FrameHeader } from "./header";
@@ -46,6 +47,8 @@ interface Calib {
 const MAX_PENDING = 512;
 const MAX_FUSION = 48;
 const MAX_CAL_RMS = 0.12;
+/** Registration fits worse than this (relative luma RMS) are discarded in favor of the detector's estimate. */
+const MAX_REFINE_RMS = 0.45;
 
 function now(): number {
   const p = (globalThis as { performance?: { now(): number } }).performance;
@@ -186,8 +189,9 @@ export class FacetReceiver {
       for (const n of gridSizesFor(set)) {
         const tiers = gridTierForSize(n).filter((t) => this.allowed.has(t));
         if (tiers.length === 0) continue;
-        const h = gridHomography(set, n, luma);
-        if (!h) continue;
+        const coarse = gridHomography(set, n, luma);
+        if (!coarse) continue;
+        const h = this.refine(luma, coarse, tiers);
         if (this.decodeGrid(image, h, n, tiers)) {
           this.lastPixelsPerCell = pixelsPerCell(h, n);
           return true;
@@ -195,6 +199,17 @@ export class FacetReceiver {
       }
     }
     return false;
+  }
+
+  /**
+   * Sub-cell registration: aligns the anchors' known structure to the luma with the current blur estimate. The
+   * detector's anchor centers are good to ≈ 0.1–0.2 cell; glyph quadrants need a few hundredths.
+   */
+  private refine(luma: LumaPlane, coarse: Homography, tiers: GridTier[]): Homography {
+    const tier = tiers.find((t) => this.calibration.has(t)) ?? (tiers[0] as GridTier);
+    const sigma = this.calibration.get(tier)?.channel.sigma ?? DEFAULT_SIGMA;
+    const r = refineHomography(luma, coarse, anchorPoints(gridLayout(tier), sigma));
+    return r && r.rms < MAX_REFINE_RMS ? r.h : coarse;
   }
 
   private calibFor(tier: GridTier, image: RgbaImage, h: Homography): Calib | null {
@@ -222,16 +237,19 @@ export class FacetReceiver {
         if (this.calibrate(image, h, tier, cand)) return true;
         continue;
       }
+      // Skip the expensive data decode when its result would be discarded: a data symbol already held, a block
+      // already recovered, or a descriptor/end frame whose descriptor is known.
+      const st = this.tiers.get(tier);
+      if (st && this.alreadyHave(st, cand.header)) {
+        this.lastTier = tier;
+        this.framesDecoded++;
+        return true;
+      }
       const cal = this.calibFor(tier, image, h);
       if (!cal) continue;
       const obs = tier === probeTier && cal === probeCal ? probe : observe(image, h, layout, cal.channel, cal.centroids);
       if (!obs) continue;
       const key = fusionKey(cand.header);
-      const st = this.tiers.get(tier);
-      if (cand.header.type === "data" && st?.seen.has(`${cand.header.sbn}/${cand.header.esi}`)) {
-        this.lastTier = tier;
-        return true; // duplicate of a symbol already held
-      }
       const prior = this.fusion.get(key) ?? null;
       const res = decodeData(obs, cand, prior);
       if (res.payload && headerCrcMatches(cand.bytes, res.payload)) {
@@ -251,6 +269,15 @@ export class FacetReceiver {
       }
     }
     return false;
+  }
+
+  /** True when decoding the data region of a frame with this header cannot add anything. */
+  private alreadyHave(st: TierState, h: FrameHeader): boolean {
+    if (h.type === "descriptor" || h.type === "end") return st.descriptor !== null;
+    if (h.type !== "data") return false;
+    if (st.seen.has(`${h.sbn}/${h.esi}`)) return true;
+    const dec = st.decoder;
+    return dec !== null && h.sbn < dec.blockCount && dec.isBlockComplete(h.sbn);
   }
 
   private calibrate(image: RgbaImage, h: Homography, tier: GridTier, cand: HeaderCandidate): boolean {

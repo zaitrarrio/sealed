@@ -47,6 +47,14 @@ export function frameMask(layout: GridLayout, id: FrameIdentity): { mask: Uint8A
   return { mask, padding: rng };
 }
 
+/**
+ * Inner-code decoding policy: erase the least confident bytes in steps, and keep RS_SAFETY_MARGIN parity symbols
+ * unused (2e + f ≤ n − k − margin). With 8 spare symbols a codeword that is not within reach decodes to a wrong
+ * codeword with probability ≈ 256⁻⁸, so wrong symbols do not reach RaptorQ (the header CRC covers only 64 bytes).
+ */
+const ERASURE_LADDER: readonly number[] = [0, 8, 16, 24, 32, 40];
+const RS_SAFETY_MARGIN = 8;
+
 const rsCache = new Map<string, ReedSolomon>();
 export function innerRs(n = 255, k = 207): ReedSolomon {
   const key = `${n}/${k}`;
@@ -155,9 +163,17 @@ export interface StreamDecodeResult {
   failed: number;
 }
 
+/** Codewords already decoded in an earlier pass, with their corrected (whitened) stream bytes. */
+export interface DecodedCodewords {
+  readonly ok: Uint8Array;
+  readonly stream: Uint8Array;
+}
+
 /**
  * RS-decodes the whitened stream read from the cells. `byteConf` ranks byte reliability (low = erase first);
  * `forcedErasures` marks bytes that must be erased (torn-frame salvage). Known zero-fill bytes are restored.
+ * Codewords marked in `known.ok` are taken from `known.stream` instead of being decoded again. Decoding stops after
+ * `maxFailures` failed codewords (the payload is then null; remaining codewords are reported as not ok).
  */
 export function decodeStream(
   layout: GridLayout,
@@ -165,7 +181,8 @@ export function decodeStream(
   mask: Uint8Array,
   byteConf: Float32Array,
   forcedErasures?: Uint8Array,
-  skip?: Uint8Array,
+  known?: DecodedCodewords,
+  maxFailures = Infinity,
 ): StreamDecodeResult {
   const C = layout.codewords;
   const rs = innerRs();
@@ -179,11 +196,12 @@ export function decodeStream(
   const maxErasures = rs.n - rs.k;
   let failed = 0;
   for (let c = 0; c < C; c++) {
-    if (skip && skip[c]) {
+    if (known && known.ok[c]) {
       ok[c] = 1;
-      for (let p = 0; p < rs.k; p++) {
+      for (let p = 0; p < rs.n; p++) {
         const j = p * C + c;
-        if (j < T) payload[j] = (stream[j] as number) ^ (mask[j] as number);
+        stream[j] = known.stream[j] as number;
+        if (p < rs.k && j < T) payload[j] = (stream[j] as number) ^ (mask[j] as number);
       }
       continue;
     }
@@ -204,23 +222,35 @@ export function decodeStream(
     }
     if (forced.length > maxErasures) {
       failed++;
+      if (failed >= maxFailures) return { payload: null, ok, stream, failed };
       continue;
     }
     const forcedSet = new Set(forced);
     const order = Array.from(idx).filter((p) => !forcedSet.has(p)).sort((a, b) => (conf[a] as number) - (conf[b] as number));
     let out: Uint8Array | null = null;
-    const budget = maxErasures - forced.length;
-    for (const extra of [0, 8, 16, 24, 32, 40, 48]) {
-      if (extra > budget) break;
-      out = rs.decode(cw, extra === 0 ? forced : forced.concat(order.slice(0, extra)));
-      if (out) break;
+    let full: Uint8Array | null = null;
+    for (const extra of ERASURE_LADDER) {
+      const erased = extra === 0 ? forced : forced.concat(order.slice(0, extra));
+      if (erased.length > maxErasures - RS_SAFETY_MARGIN) break;
+      const cand = rs.decode(cw, erased);
+      if (!cand) continue;
+      // Miscorrection guard: accept only when 2e + f leaves RS_SAFETY_MARGIN parity symbols unused, where e counts
+      // corrected positions outside the erasures. Decoding at the full radius n − k would "correct" any word.
+      const enc = rs.encode(cand);
+      const erasedSet = new Set(erased);
+      let errors = 0;
+      for (let p = 0; p < rs.n; p++) if (!erasedSet.has(p) && enc[p] !== cw[p]) errors++;
+      if (2 * errors + erased.length > maxErasures - RS_SAFETY_MARGIN) continue;
+      out = cand;
+      full = enc;
+      break;
     }
-    if (!out) {
+    if (!out || !full) {
       failed++;
+      if (failed >= maxFailures) return { payload: null, ok, stream, failed };
       continue;
     }
     ok[c] = 1;
-    const full = rs.encode(out);
     for (let p = 0; p < rs.n; p++) {
       const j = p * C + c;
       stream[j] = (full[p] as number) ^ (mask[j] as number);
