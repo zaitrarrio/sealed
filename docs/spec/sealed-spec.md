@@ -251,8 +251,8 @@ Receiver `POST /v1/transfers/{id}/claims`
 ```json
 {
   "cs": "base64url(16 bytes)",
-  "receiver_pub": "base64url(33 bytes, DAK compressed)",
-  "receiver_sig_pub": "base64url(33 bytes, DSK compressed)",
+  "receiver_pub": "base64url(65 bytes, DAK uncompressed SEC1)",
+  "receiver_sig_pub": "base64url(65 bytes, DSK uncompressed SEC1)",
   "label": "Pixel 8",
   "key_protection": "strongbox | secure-enclave | tee | browser",
   "attestation": "base64url(optional platform attestation)"

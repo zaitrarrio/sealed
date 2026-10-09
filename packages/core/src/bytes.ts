@@ -25,7 +25,7 @@ export function utf8(s: string): Uint8Array {
 }
 
 export function fromUtf8(b: Uint8Array): string {
-  return new TextDecoder("utf-8", { fatal: true }).decode(b);
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(b);
 }
 
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";

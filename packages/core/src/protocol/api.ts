@@ -33,6 +33,7 @@ export const ErrorCode = {
   TooLarge: "too_large",
   ChainInvalid: "chain_invalid",
   Conflict: "conflict",
+  Internal: "internal",
 } as const;
 
 // ---------------------------------------------------------------- identities
@@ -266,6 +267,7 @@ export const Paths = {
 export const Limits = {
   maxSegmentCipherBytes: 1024 * 1024 + 16,
   maxPaddingPartBytes: 8 * 1024 * 1024,
+  maxManifestPartBytes: 4 * 1024 * 1024,
   claimTimeoutSeconds: 120,
   defaultTtlSeconds: 86400,
   roomMaxTtlSeconds: 7 * 86400,

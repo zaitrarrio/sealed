@@ -206,7 +206,7 @@ class Reader {
       case 2:
         return this.take(value);
       case 3:
-        return new TextDecoder("utf-8", { fatal: true }).decode(this.take(value));
+        return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(this.take(value));
       case 4: {
         if (value > this.b.length - this.off) throw new CborError("array length exceeds input");
         const arr: CborValue[] = [];

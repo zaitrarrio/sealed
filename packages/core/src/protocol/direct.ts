@@ -11,7 +11,7 @@ import { EnvelopeBuilder, EnvelopeReader, PayloadExtractor, type EnvelopeInput, 
 import type { Manifest } from "../envelope/manifest";
 import { sizeBucket } from "../envelope/manifest";
 import { Limits, type ClaimSummary, type UvEvidence } from "./api";
-import { RelayClient } from "./client";
+import { RelayClient, RelayError } from "./client";
 import { claimCode } from "./codes";
 
 export interface UploadProgress {
@@ -164,8 +164,14 @@ export async function claimTransfer(o: { client: RelayClient; transferId: Uint8A
 export async function waitForApproval(client: RelayClient, h: ClaimHandle, signal?: AbortSignal): Promise<"approved" | "denied" | "expired" | "revoked"> {
   for (;;) {
     if (signal?.aborted) throw new Error("cancelled");
-    const s = await client.claimStatus(h.claimId, h.claimToken, 25);
-    if (s.status === "approved" && s.transfer_ready) return "approved";
+    let s;
+    try {
+      s = await client.claimStatus(h.claimId, h.claimToken, 25);
+    } catch (e) {
+      if (e instanceof RelayError && (e.status === 404 || e.status === 410)) return e.code === "revoked" ? "revoked" : "expired";
+      throw e;
+    }
+    if ((s.status === "approved" || s.status === "downloaded") && s.transfer_ready) return "approved";
     if (s.status === "denied" || s.status === "expired" || s.status === "revoked") return s.status;
   }
 }
