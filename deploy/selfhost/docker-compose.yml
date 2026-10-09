@@ -1,0 +1,62 @@
+# Self-hosted Sealed relay (spec §9.5).
+#   cp deploy/selfhost/.env.example deploy/selfhost/.env   # then edit
+#   docker compose -f deploy/selfhost/docker-compose.yml up -d --build
+#   curl http://localhost:8787/v1/health
+# Optional TURN for live Paired transfers:
+#   docker compose -f deploy/selfhost/docker-compose.yml --profile turn up -d
+name: sealed
+
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/selfhost/Dockerfile
+      # Optional CA for TLS-intercepting proxies during the build; an empty file disables it.
+      secrets:
+        - extra_ca
+    image: sealed-relay:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8787"
+      SEALED_DATA_DIR: /data
+    ports:
+      - "${SEALED_RELAY_PORT:-8787}:8787"
+    volumes:
+      - relay-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/v1/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  coturn:
+    image: coturn/coturn:4.6.3
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_REALM: ${TURN_REALM:-sealed.local}
+    # Refuses to start without a shared secret; credentials are minted by the relay (TURN_URLS + TURN_SHARED_SECRET).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$TURN_SHARED_SECRET" ]; then echo "set TURN_SHARED_SECRET in deploy/selfhost/.env" >&2; exit 1; fi
+        exec turnserver -n --log-file=stdout --listening-port=3478 --fingerprint \
+          --use-auth-secret --static-auth-secret="$$TURN_SHARED_SECRET" --realm="$$TURN_REALM" \
+          --min-port=49160 --max-port=49200 --no-cli --no-tlsv1 --no-tlsv1_1 \
+          --denied-peer-ip=0.0.0.0-0.255.255.255 --denied-peer-ip=127.0.0.0-127.255.255.255 \
+          --denied-peer-ip=10.0.0.0-10.255.255.255 --denied-peer-ip=172.16.0.0-172.31.255.255 \
+          --denied-peer-ip=192.168.0.0-192.168.255.255 --denied-peer-ip=169.254.0.0-169.254.255.255
+
+volumes:
+  relay-data:
+
+secrets:
+  extra_ca:
+    file: ${SEALED_BUILD_CA_FILE:-./empty-ca.pem}

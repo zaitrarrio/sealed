@@ -11,3 +11,5 @@ apps/mobile/android/
 .DS_Store
 data/
 target/
+.dev.vars
+deploy/selfhost/.env

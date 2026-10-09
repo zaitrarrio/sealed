@@ -1,0 +1,12 @@
+{
+  "name": "@sealed/relay-selfhost",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs the Sealed relay bundle on workerd (via Miniflare) with persisted Durable Object, R2 and D1 state",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": {
+    "miniflare": "5.20261006.1-alpha"
+  }
+}

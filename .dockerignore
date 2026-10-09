@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.wrangler
+**/.e2e
+**/target
+**/.env
+**/.env.local
+.git
+tools
+apps
+data
