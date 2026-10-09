@@ -1,0 +1,15 @@
+[package]
+name = "fec-vectors"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Generates RaptorQ cross-check vectors for @sealed/core from the reference raptorq crate"
+
+[dependencies]
+raptorq = "=2.0.1"
+serde_json = "1"
+rand = "0.9"
+rand_chacha = "0.9"
+
+[profile.release]
+opt-level = 3
