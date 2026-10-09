@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.to.sealed.app"],
+        "components": [
+          { "/": "/c/*", "comment": "claim codes" },
+          { "/": "/p", "comment": "pairing codes" },
+          { "/": "/d", "comment": "new-device codes" },
+          { "/": "/k", "comment": "offline key codes" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": { "apps": ["TEAMID.to.sealed.app"] }
+}
