@@ -1,5 +1,5 @@
 /**
- * Metro for the pnpm monorepo. @sealed/core and @sealed/tokens are TypeScript sources linked from packages/*
+ * Metro for the pnpm monorepo (symlinks are followed by default). @sealed/core and @sealed/tokens are TypeScript sources linked from packages/*
  * through an `exports` map, and their own dependencies (@noble/*, fflate, jsqr, qrcode, zod) live in
  * packages/core/node_modules. Metro therefore has to: watch the workspace root, follow pnpm symlinks, honour
  * package `exports`, and keep hierarchical node_modules lookup enabled so packages resolve their own deps.
@@ -16,7 +16,6 @@ config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot
 
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules"), path.resolve(workspaceRoot, "node_modules")];
 config.resolver.disableHierarchicalLookup = false;
-config.resolver.unstable_enableSymlinks = true;
 config.resolver.unstable_enablePackageExports = true;
 
 // Keep other apps' build output, the relay's local state and native build folders out of the haste map.

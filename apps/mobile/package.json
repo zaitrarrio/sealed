@@ -15,8 +15,7 @@
     "export": "expo export --platform ios --platform android --output-dir dist",
     "export:ios": "expo export --platform ios --output-dir dist/ios",
     "export:android": "expo export --platform android --output-dir dist/android",
-    "prebuild": "expo prebuild --no-install --clean",
-    "lint:kotlin": "node scripts/kotlinc-check.mjs"
+    "prebuild": "expo prebuild --no-install --clean"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "15.0.2",
@@ -45,6 +44,7 @@
     "expo-sharing": "~57.0.22",
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.4",
     "expo-task-manager": "~57.0.21",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -68,5 +68,20 @@
     "@types/react": "~19.2.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "typescript"
+      ]
+    },
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "sealed-keystore",
+          "react-native-webrtc"
+        ]
+      }
+    }
   }
 }

@@ -56,7 +56,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         UIBackgroundModes: ["remote-notification"],
         ITSAppUsesNonExemptEncryption: true,
       },
-      config: { usesNonExemptEncryption: true },
     },
     android: {
       package: androidPackage,
