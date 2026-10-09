@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
+    "paths": {
+      "@sealed/core": ["./node_modules/.cache/sealed-core-types/index.d.ts"]
+    }
+  },
+  "include": ["src", "test", "test-selfhost"]
+}

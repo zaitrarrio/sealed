@@ -1,0 +1,17 @@
+{
+  "//": "Emits declaration files for @sealed/core so the relay typechecks against core's public types under Workers globals (core's own sources are checked by its package with DOM/Node libs).",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noCheck": true,
+    "rootDir": "../../packages/core/src",
+    "outDir": "./node_modules/.cache/sealed-core-types",
+    "lib": ["ES2023", "DOM"],
+    "types": []
+  },
+  "files": ["../../packages/core/src/index.ts"]
+}

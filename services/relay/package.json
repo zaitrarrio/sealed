@@ -1,0 +1,34 @@
+{
+  "name": "@sealed/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sealed server-blind relay: Cloudflare Workers + Hono + Durable Objects + R2 + D1",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.core-types.json && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "db:migrate:local": "wrangler d1 migrations apply sealed-meta --local",
+    "db:migrate:remote": "wrangler d1 migrations apply sealed-meta --remote",
+    "cf-typegen": "wrangler types --include-runtime false",
+    "test:selfhost": "vitest run --config test-selfhost/vitest.config.ts",
+    "selfhost:up": "docker compose -f ../../deploy/selfhost/docker-compose.yml up -d --build",
+    "selfhost:down": "docker compose -f ../../deploy/selfhost/docker-compose.yml down"
+  },
+  "dependencies": {
+    "@sealed/core": "workspace:*",
+    "@simplewebauthn/server": "14.0.3",
+    "hono": "4.13.13",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.23.0",
+    "@cloudflare/workers-types": "5.20261009.1",
+    "@noble/curves": "2.4.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "wrangler": "4.149.0"
+  }
+}

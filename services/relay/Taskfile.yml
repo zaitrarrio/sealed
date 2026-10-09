@@ -1,0 +1,81 @@
+# Relay lifecycle (go-task). Run from services/relay or with `task -d services/relay <target>`.
+version: "3"
+
+vars:
+  COMPOSE: docker compose -f ../../deploy/selfhost/docker-compose.yml
+
+tasks:
+  setup:
+    desc: Install dependencies and create local secrets from the template
+    cmds:
+      - task: install
+      - cmd: test -f .dev.vars || cp .env.example .dev.vars
+
+  install:
+    desc: Install workspace dependencies
+    dir: ../..
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  typecheck:
+    desc: Typecheck the relay against @sealed/core's public types
+    cmds:
+      - pnpm typecheck
+
+  test:
+    desc: Run the Workers-runtime test suite (real DOs, R2, D1 in Miniflare)
+    cmds:
+      - pnpm test
+
+  build:
+    desc: Bundle the Worker to dist/ without deploying
+    cmds:
+      - pnpm build
+
+  dev:
+    desc: Run the relay locally with wrangler dev (dev environment vars)
+    deps: [db:migrate]
+    cmds:
+      - pnpm wrangler dev --env dev
+
+  db:migrate:
+    desc: Apply D1 migrations to the local dev database
+    cmds:
+      - pnpm wrangler d1 migrations apply sealed-meta-dev --local --env dev
+
+  db:migrate:remote:
+    desc: Apply D1 migrations to the production database
+    cmds:
+      - pnpm db:migrate:remote
+
+  db:reset:
+    desc: Delete local wrangler state (D1, R2, DOs) and re-apply migrations
+    cmds:
+      - rm -rf .wrangler/state
+      - task: db:migrate
+
+  deploy:
+    desc: Deploy to Cloudflare
+    deps: [typecheck, test]
+    cmds:
+      - pnpm deploy
+
+  up:
+    desc: Build and start the self-hosted stack (relay on workerd with persisted state)
+    cmds:
+      - "{{.COMPOSE}} up -d --build"
+
+  up:turn:
+    desc: Start the self-hosted stack with coturn
+    cmds:
+      - "{{.COMPOSE}} --profile turn up -d --build"
+
+  down:
+    desc: Stop the self-hosted stack (keeps the data volume)
+    cmds:
+      - "{{.COMPOSE}} --profile turn down"
+
+  test:selfhost:
+    desc: Run the end-to-end test against the running self-hosted relay
+    cmds:
+      - RELAY_URL=${RELAY_URL:-http://localhost:8787} pnpm test:selfhost
