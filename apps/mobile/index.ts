@@ -4,4 +4,6 @@
  * takes over. ES module evaluation order follows import order, so this file only contains these two imports.
  */
 import "./src/polyfills";
+// Background push task must be defined at startup, before any screen mounts.
+import "./src/lib/push";
 import "expo-router/entry";

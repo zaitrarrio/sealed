@@ -24,6 +24,8 @@ export interface MobileDeviceKeys extends DeviceKeys {
 export interface NativeOrSoftwareAgreementKey extends AgreementKey {
   /** DH with an explicit authentication mode and prompt text. */
   dhWith(peerPublicKey: Uint8Array, mode: AuthMode, reason: string): Promise<Uint8Array>;
+  /** Sets the prompt text used by plain `dh()` calls (e.g. naming the transfer being opened). */
+  setReason(reason: string): void;
 }
 
 export interface NativeOrSoftwareSigningKey extends SigningKey {
@@ -86,6 +88,9 @@ export class NativeSigningKey implements NativeOrSoftwareSigningKey {
 class SoftwareAgreement extends SoftwareAgreementKey implements NativeOrSoftwareAgreementKey {
   dhWith(peerPublicKey: Uint8Array): Promise<Uint8Array> {
     return this.dh(peerPublicKey);
+  }
+  setReason(): void {
+    // Software keys never prompt.
   }
 }
 
