@@ -9,6 +9,15 @@ export function sha256(data: Uint8Array): Uint8Array {
   return nobleSha256(data);
 }
 
+/** Incremental SHA-256, for hashing files in chunks. */
+export function createSha256(): { update(chunk: Uint8Array): void; digest(): Uint8Array } {
+  const h = nobleSha256.create();
+  return {
+    update: (chunk) => void h.update(chunk),
+    digest: () => h.digest(),
+  };
+}
+
 export function hkdfExtract(salt: Uint8Array, ikm: Uint8Array): Uint8Array {
   return extract(nobleSha256, ikm, salt);
 }
