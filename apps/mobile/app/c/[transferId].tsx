@@ -16,6 +16,7 @@ import { takeCode } from "../../src/lib/code-stash";
 import { useOnUnmount, useUnmountSignal } from "../../src/lib/hooks";
 import { claimAttestation } from "../../src/lib/native-keys";
 import { ReceiveSink, type ReceivedFile } from "../../src/lib/received";
+import { describeSender, type SenderView } from "../../src/lib/sender-check";
 import { useSession } from "../../src/lib/session";
 import { B, Button, CheckCode, Disclosure, Notice, P, Progress, Screen, Spinner, Title, errorMessage } from "../../src/ui/kit";
 
@@ -23,7 +24,7 @@ type Phase =
   | { name: "claiming" }
   | { name: "waiting"; handle: ClaimHandle }
   | { name: "downloading"; handle: ClaimHandle; manifest: Manifest | null; done: number; total: number }
-  | { name: "done"; handle: ClaimHandle; manifest: Manifest; files: ReceivedFile[] }
+  | { name: "done"; handle: ClaimHandle; manifest: Manifest; files: ReceivedFile[]; sender: SenderView | null }
   | { name: "ended"; title: string; detail: string; handle?: ClaimHandle };
 
 function endedFor(status: "denied" | "expired" | "revoked"): { title: string; detail: string } {
@@ -101,6 +102,7 @@ export default function Claim() {
         return;
       }
       let manifest: Manifest | null = null;
+      let senderView: Promise<SenderView | null> = Promise.resolve(null);
       setPhase({ name: "downloading", handle, manifest: null, done: 0, total: 0 });
       // The unwrap needs the agreement key: one Face ID / fingerprint prompt naming what is being opened.
       keys.agreement.setReason("Receive the files you were sent");
@@ -116,12 +118,17 @@ export default function Claim() {
           signal,
           onManifest: (mm) => {
             manifest = mm;
+            senderView = describeSender(mm.sender, s.chain).then((v) => {
+              if (v) sink.from = v.display;
+              return v;
+            });
             setPhase({ name: "downloading", handle, manifest: mm, done: 0, total: mm.files.reduce((a, f) => a + f.size, 0) });
           },
           onProgress: (p) => setPhase({ name: "downloading", handle, manifest, done: p.bytesDone, total: p.totalBytes }),
         });
         finished.current = true;
-        setPhase({ name: "done", handle, manifest: m, files: [...sink.files] });
+        const sender = await senderView.catch(() => null);
+        setPhase({ name: "done", handle, manifest: m, files: [...sink.files], sender });
       } catch (e) {
         if (signal.aborted) return;
         if (e instanceof RelayError && (e.code === "revoked" || e.status === 410)) setPhase({ name: "ended", handle, ...endedFor("revoked") });
@@ -156,7 +163,7 @@ export default function Claim() {
           {phase.manifest ? (
             <P>
               {phase.manifest.files.length} {phase.manifest.files.length === 1 ? "file" : "files"} · {formatBytes(phase.total)}
-              {phase.manifest.sender ? ` from ${phase.manifest.sender.label}` : ""}
+              {phase.manifest.sender ? ` · says it is from “${phase.manifest.sender.label}”` : ""}
             </P>
           ) : null}
           <Progress fraction={phase.total ? phase.done / phase.total : 0} label="Decrypting and verifying" />
@@ -165,11 +172,16 @@ export default function Claim() {
       {phase.name === "done" ? (
         <>
           <Title eyebrow="Received">{phase.files.length === 1 ? "Your file is here" : `${phase.files.length} files are here`}</Title>
-          {phase.manifest.sender ? (
-            <P>
-              From <B>{phase.manifest.sender.label}</B>
-              {phase.manifest.signature ? ", signed by the sender's device." : "."} Every file was verified against the sender's manifest.
-            </P>
+          {phase.sender ? (
+            phase.sender.verified ? (
+              <P>
+                From <B>{phase.sender.display}</B>, a paired contact — the signature matches their verified device list. Every file was verified against the sender's manifest.
+              </P>
+            ) : (
+              <P>
+                From {phase.sender.display}. Sealed cannot confirm who that is: anyone can type a name. Every file was verified against the manifest the sender's device signed.
+              </P>
+            )
           ) : null}
           <ReceivedFiles files={phase.files} />
           <Disclosure title="Report this transfer">
