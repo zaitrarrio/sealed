@@ -6,7 +6,7 @@
  * symbols make up for the dropped ones.
  */
 import type { RgbaImage } from "@sealed/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Camera, useCameraDevice, useCameraPermission, useFrameOutput, type Frame } from "react-native-vision-camera";
 import { createSynchronizable, scheduleOnRN } from "react-native-worklets";
@@ -16,6 +16,11 @@ import { FacetDecodeSession, type DecodeProgress, type DecodeResult, type Decode
 import { isSupportedFormat, toRgba } from "../lib/frame-convert";
 import { Button, Notice, P, Row } from "../ui/kit";
 import { scannerStyles } from "./Scanner";
+
+// Stable references: VisionCamera rebuilds the frame output (and its worklet runtime) when these change.
+const TARGET_RESOLUTION = { width: 1920, height: 1080 } as const;
+const CONSTRAINTS = [{ fps: 60 }];
+const NOOP = () => undefined;
 
 export function OpticalCapture({
   options,
@@ -42,7 +47,7 @@ export function OpticalCapture({
 
   useEffect(() => () => busy.setBlocking(true), [busy]);
 
-  const decode = (buffer: ArrayBuffer, width: number, height: number, bytesPerRow: number, format: string, timestamp: number): void => {
+  const decodeImpl = (buffer: ArrayBuffer, width: number, height: number, bytesPerRow: number, format: string, timestamp: number): void => {
     void (async () => {
       try {
         if (session.finished) return;
@@ -72,11 +77,12 @@ export function OpticalCapture({
     })();
   };
 
-  const output = useFrameOutput({
-    pixelFormat: "rgb",
-    targetResolution: { width: 1920, height: 1080 },
-    dropFramesWhileBusy: true,
-    onFrame: (frame: Frame) => {
+  const decodeRef = useRef(decodeImpl);
+  decodeRef.current = decodeImpl;
+  const decode = useCallback((buffer: ArrayBuffer, width: number, height: number, bytesPerRow: number, format: string, timestamp: number) => decodeRef.current(buffer, width, height, bytesPerRow, format, timestamp), []);
+
+  const onFrame = useCallback(
+    (frame: Frame) => {
       "worklet";
       try {
         if (busy.getDirty()) return;
@@ -89,7 +95,19 @@ export function OpticalCapture({
         frame.dispose();
       }
     },
+    [busy, decode],
+  );
+
+  const output = useFrameOutput({
+    pixelFormat: "rgb",
+    targetResolution: TARGET_RESOLUTION,
+    dropFramesWhileBusy: true,
+    onFrame,
+    // Drops while a decode is running are expected (RaptorQ covers them); do not log each one.
+    onFrameDropped: NOOP,
   });
+
+  const outputs = useMemo(() => [output], [output]);
 
   if (!hasPermission) {
     return (
@@ -112,8 +130,8 @@ export function OpticalCapture({
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={focused && appActive && !done}
-          outputs={[output]}
-          constraints={[{ fps: 60 }]}
+          outputs={outputs}
+          constraints={CONSTRAINTS}
           onError={(e) => cbs.current.onError(e.message)}
         />
         <View style={scannerStyles.reticle} pointerEvents="none" />

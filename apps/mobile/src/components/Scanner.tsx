@@ -6,11 +6,13 @@
 import { color, radius } from "@sealed/tokens";
 import * as Clipboard from "expo-clipboard";
 import { useIsFocused } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission, useObjectOutput, type ScannedObject } from "react-native-vision-camera";
+import { Camera, useCameraDevice, useCameraPermission, useObjectOutput, type ScannedObject, type ScannedObjectType } from "react-native-vision-camera";
 import { useAppActive } from "../lib/app-state";
 import { Button, Field, Notice, P, Row, Spinner } from "../ui/kit";
+
+const QR_TYPES: ScannedObjectType[] = ["qr"];
 
 export interface ScannerProps {
   onCode: (text: string) => string | null | Promise<string | null>;
@@ -51,7 +53,7 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
   }, []);
 
   const output = useObjectOutput({
-    types: ["qr"],
+    types: QR_TYPES,
     onObjectsScanned: (objects: ScannedObject[]) => {
       for (const o of objects) {
         const value = (o as { value?: string }).value;
@@ -63,6 +65,7 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
     },
   });
 
+  const outputs = useMemo(() => [output], [output]);
   const cameraOn = hasPermission && device !== undefined && focused && appActive && !accepted;
 
   return (
@@ -80,7 +83,7 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
         <Notice tone="danger">No camera is available on this device. Paste the code instead.</Notice>
       ) : (
         <View style={styles.frame} accessibilityLabel={label}>
-          <Camera style={StyleSheet.absoluteFill} device={device} isActive={cameraOn} outputs={[output]} onError={(e) => setMessage(e.message)} />
+          <Camera style={StyleSheet.absoluteFill} device={device} isActive={cameraOn} outputs={outputs} onError={(e) => setMessage(e.message)} />
           <View style={styles.reticle} pointerEvents="none" />
         </View>
       )}
