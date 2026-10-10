@@ -137,18 +137,23 @@ class EncryptingWriter {
 export class ReceiveSink implements ExtractSink {
   readonly files: ReceivedFile[] = [];
   private writer: EncryptingWriter | null = null;
+  /** Set by discard(); a receive still in flight then stops writing and records nothing. */
+  private discarded = false;
   bytesWritten = 0;
 
   constructor(
     private readonly deviceKey: AgreementKey,
-    private readonly from?: string,
+    /** Who it came from, as shown in the received list; may be set once the manifest is known. */
+    public from?: string,
   ) {}
 
   onFileStart(): void {
+    if (this.discarded) throw new Error("receive cancelled");
     this.writer = new EncryptingWriter();
   }
 
   async onFileData(_entry: FileEntry, chunk: Uint8Array): Promise<void> {
+    if (this.discarded) throw new Error("receive cancelled");
     if (!this.writer) throw new Error("file data before start");
     await this.writer.write(chunk);
     this.bytesWritten += chunk.length;
@@ -156,8 +161,15 @@ export class ReceiveSink implements ExtractSink {
 
   async onFileEnd(entry: FileEntry): Promise<void> {
     if (!this.writer) throw new Error("file end before start");
-    const { id, wrap, chunks } = await this.writer.close(this.deviceKey);
+    const writer = this.writer;
+    const { id, wrap, chunks } = await writer.close(this.deviceKey);
     this.writer = null;
+    if (this.discarded) {
+      // discard() ran while the file key was being wrapped: drop this file too.
+      const f = dataFile(id);
+      if (f.exists) f.delete();
+      throw new Error("receive cancelled");
+    }
     const rec: ReceivedFile = {
       id,
       path: entry.path,
@@ -175,6 +187,7 @@ export class ReceiveSink implements ExtractSink {
 
   /** Removes everything this sink wrote (a failed or cancelled transfer). */
   async discard(): Promise<void> {
+    this.discarded = true;
     this.writer?.abort();
     this.writer = null;
     const ids = new Set(this.files.map((f) => f.id));
