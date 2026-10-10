@@ -63,6 +63,18 @@ describe("encrypted storage", () => {
     await expect(allRecords("contacts")).rejects.toThrow();
   });
 
+  it("recovers a replace interrupted between deleting the old file and moving the new one in", async () => {
+    __fs.reset();
+    const secrets = new MemSecrets();
+    setStorageForTesting(new EncryptedStorage(undefined, secrets));
+    await kvSet("k", "v");
+    const bin = [...__fs.files.keys()].find((k) => k.endsWith("/kv.bin"))!;
+    __fs.files.set(`${bin}.tmp`, __fs.files.get(bin)!);
+    __fs.files.delete(bin);
+    setStorageForTesting(new EncryptedStorage(undefined, secrets));
+    expect(await kvGet("k")).toBe("v");
+  });
+
   it("serializes tagged bytes", () => {
     const b = new Uint8Array([1, 2, 3]);
     expect(deserialize<{ b: Uint8Array }>(serialize({ b })).b).toEqual(b);
@@ -118,6 +130,18 @@ describe("received files at rest", () => {
     sink.onFileStart();
     await sink.onFileData(entry("x", 10), randomBytes(10));
     await sink.discard();
+    expect([...__fs.files.keys()].filter((k) => k.endsWith(".sealed"))).toEqual([]);
+  });
+
+  it("keeps nothing when discarded while the last file is being finished", async () => {
+    const device = new SoftwareAgreementKey();
+    const sink = new ReceiveSink(device);
+    sink.onFileStart();
+    await sink.onFileData(entry("late.bin", 100), randomBytes(100));
+    const ending = sink.onFileEnd(entry("late.bin", 100));
+    await sink.discard();
+    await expect(ending).rejects.toThrow(/cancelled/);
+    expect(await listReceived()).toEqual([]);
     expect([...__fs.files.keys()].filter((k) => k.endsWith(".sealed"))).toEqual([]);
   });
 });

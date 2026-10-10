@@ -6,7 +6,7 @@
  * Each store is one file under the app's document directory, sealed with AES-256-GCM under a random 256-bit
  * storage key kept in the platform keystore through expo-secure-store (iOS Keychain, Android Keystore-backed
  * encrypted preferences), accessible only after first unlock on this device. Records are JSON with byte arrays
- * tagged, so `Uint8Array` fields round-trip. Writes are serialized per store and replace the file atomically.
+ * tagged, so `Uint8Array` fields round-trip. Writes are serialized per store and replace the file through a temporary copy; a replace interrupted by the app being killed is completed on the next read.
  */
 import * as SecureStore from "expo-secure-store";
 import { Directory, File, Paths } from "expo-file-system";
@@ -38,8 +38,15 @@ class ExpoFileBackend implements StorageBackend {
   }
 
   async read(name: string): Promise<Uint8Array | null> {
-    const f = new File(this.dir(), `${name}.bin`);
-    if (!f.exists) return null;
+    const dir = this.dir();
+    const f = new File(dir, `${name}.bin`);
+    if (!f.exists) {
+      // write() completes the temporary file before replacing the target; if the app died between deleting
+      // the old file and moving the new one in, the temporary file is the latest complete state.
+      const tmp = new File(dir, `${name}.bin.tmp`);
+      if (!tmp.exists) return null;
+      tmp.move(f);
+    }
     return new Uint8Array(await f.bytes());
   }
 
