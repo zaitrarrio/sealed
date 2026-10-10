@@ -145,7 +145,7 @@ export function ClaimPage() {
           {phase.manifest && (
             <p className="muted">
               {phase.manifest.files.length} {phase.manifest.files.length === 1 ? "file" : "files"} · {formatBytes(phase.total)}
-              {phase.manifest.sender ? ` from ${phase.manifest.sender.label}` : ""}
+              {phase.manifest.sender ? ` · says it is from “${phase.manifest.sender.label}”` : ""}
             </p>
           )}
           <Progress fraction={phase.total ? phase.done / phase.total : 0} label="Decrypting and verifying" />
@@ -158,8 +158,8 @@ export function ClaimPage() {
           </PageTitle>
           {phase.manifest.sender && (
             <p className="muted">
-              From <strong>{phase.manifest.sender.label}</strong>
-              {phase.manifest.signature ? ", signed by the sender's device." : "."} Every file was verified against the sender's manifest.
+              The sender calls themselves <strong>{phase.manifest.sender.label}</strong>. Sealed cannot confirm that name: anyone can type one. Every file was verified against the
+              manifest {phase.manifest.signature ? "their device signed" : "they sent"}.
             </p>
           )}
           <ReceivedFiles files={phase.files} />

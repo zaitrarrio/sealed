@@ -252,7 +252,7 @@ export function ReceiveOfflinePage() {
     return (
       <div className="stack-lg" data-testid="airgap-done">
         <PageTitle eyebrow="Received offline">{result.files.length === 1 ? "Your file is here" : `${result.files.length} files are here`}</PageTitle>
-        {result.sender && <p className="muted">From {result.sender.label}, signed by the sender's device.</p>}
+        {result.sender && <p className="muted">The sender calls themselves “{result.sender.label}”. Sealed cannot confirm that name; the check code is what tells you the stream came from the person in front of you.</p>}
         <ReceivedFiles files={result.files} />
         <Link to="/" className="btn ghost">
           Done
