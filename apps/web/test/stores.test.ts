@@ -90,7 +90,7 @@ describe("contacts store", () => {
     const made = [];
     for (const name of ["Zoe", "Ana"]) {
       const { link, state } = await createIdentity({ signing: keys.signing, agreementPublicKey: keys.agreement.publicKey, label: name, protection: "browser", }, 1_700_000_000 + made.length);
-      const contact = contactFromPeer({ chain: state, nonce: randomBytes(16), label: name });
+      const contact = contactFromPeer({ chain: state, links: [link], nonce: randomBytes(16), label: name });
       await saveContact(recordFromContact(contact, [link]));
       made.push({ state, link });
     }
@@ -111,7 +111,7 @@ describe("contacts store", () => {
   it("treats a cached chain that does not verify as absent", async () => {
     const keys = deviceKeysFromStored(await generateStoredDeviceKeys());
     const { link, state } = await createIdentity({ signing: keys.signing, agreementPublicKey: keys.agreement.publicKey, label: "Eve", protection: "browser" });
-    const rec = recordFromContact(contactFromPeer({ chain: state, nonce: randomBytes(16), label: "Eve" }), [link]);
+    const rec = recordFromContact(contactFromPeer({ chain: state, links: [link], nonce: randomBytes(16), label: "Eve" }), [link]);
     const tampered = link.slice();
     tampered[tampered.length - 1] = (tampered[tampered.length - 1] as number) ^ 1;
     expect(cachedChain({ ...rec, chainLinks: [toB64url(tampered)] })).toBeNull();

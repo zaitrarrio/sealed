@@ -147,7 +147,8 @@ export function PairPage() {
                 void (async () => {
                   try {
                     const contact = contactFromPeer(peer, name.trim());
-                    const { links } = await s.client.getChain(peer.chain.fingerprint);
+                    // Cache exactly the links that were verified against the scanned code, not a second fetch.
+                    const links = peer.links;
                     const existing = await getContact(recordFromContact(contact, links).id);
                     await saveContact({ ...recordFromContact(contact, links), ...(existing ? { pairedAt: existing.pairedAt } : {}) });
                     await watchContacts();

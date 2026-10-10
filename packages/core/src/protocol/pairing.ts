@@ -25,6 +25,8 @@ export function createPairingOffer(origin: string, me: ChainState, label: string
 
 export interface ScannedPeer {
   chain: ChainState;
+  /** The links `chain` was verified from; cache exactly these with the contact. */
+  links: Uint8Array[];
   nonce: Uint8Array;
   label: string;
 }
@@ -35,7 +37,7 @@ export async function verifyScannedPairingCode(client: RelayClient, code: Extrac
   const chain = verifyChain(links, code.fingerprint);
   const atSeq = chain.hashes[code.headSeq];
   if (!atSeq || !ctEqual(atSeq, code.headHash)) throw new Error("the relay's copy of this identity does not match the scanned code");
-  return { chain, nonce: code.nonce, label: code.label };
+  return { chain, links: [...links], nonce: code.nonce, label: code.label };
 }
 
 export function pairingCheckCode(myNonce: Uint8Array, me: ChainState, peer: ScannedPeer): string {
