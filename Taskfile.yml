@@ -1,0 +1,35 @@
+# Sealed monorepo tasks (go-task: https://taskfile.dev). Each package also has its own Taskfile.
+version: "3"
+
+includes:
+  relay: { taskfile: services/relay/Taskfile.yml, dir: services/relay }
+  web: { taskfile: apps/web/Taskfile.yml, dir: apps/web }
+  mobile: { taskfile: apps/mobile/Taskfile.yml, dir: apps/mobile }
+
+tasks:
+  install:
+    desc: Install all workspace dependencies
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  typecheck:
+    desc: Strict typecheck of every package
+    cmds:
+      - pnpm -r typecheck
+
+  test:
+    desc: Unit tests of every package (core, tokens, relay, web, mobile)
+    cmds:
+      - pnpm -r test
+
+  check:
+    desc: Everything CI runs — typecheck, unit tests, web e2e, mobile bundle
+    cmds:
+      - task: typecheck
+      - task: test
+      - task: web:e2e
+      - task: mobile:export
+
+  dev:
+    desc: Local relay (:8787) and web client (:5173) together
+    deps: [relay:dev, web:dev]

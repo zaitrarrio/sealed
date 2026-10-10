@@ -1,0 +1,48 @@
+# Mobile app lifecycle (go-task). Run from apps/mobile or with `task -d apps/mobile <target>`.
+version: "3"
+
+tasks:
+  setup:
+    desc: Install dependencies and create .env from the template
+    dir: ../..
+    cmds:
+      - pnpm install --frozen-lockfile
+      - cmd: test -f apps/mobile/.env || cp apps/mobile/.env.example apps/mobile/.env
+
+  typecheck:
+    cmds:
+      - pnpm typecheck
+
+  test:
+    desc: Unit tests (storage, at-rest encryption, hardware-key binding, routing, optical decode)
+    cmds:
+      - pnpm test
+
+  doctor:
+    cmds:
+      - npx expo-doctor
+
+  export:
+    desc: Bundle both platforms with Metro/Hermes (no native toolchain needed)
+    cmds:
+      - npx expo export --platform ios --platform android --output-dir dist
+
+  prebuild:
+    desc: Generate ios/ and android/ (not committed)
+    cmds:
+      - npx expo prebuild --clean
+
+  ios:
+    desc: Build and run a development build on a connected iPhone (needs Xcode)
+    cmds:
+      - npx expo run:ios --device
+
+  android:
+    desc: Build and run a development build on a connected Android phone (needs the Android SDK)
+    cmds:
+      - npx expo run:android --device
+
+  start:
+    desc: Metro for an installed development build
+    cmds:
+      - npx expo start --dev-client
