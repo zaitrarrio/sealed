@@ -4,10 +4,20 @@ version: "3"
 tasks:
   setup:
     desc: Install dependencies and create .env from the template
+    cmds:
+      - task: install
+      - task: setup:env
+
+  setup:env:
+    desc: Create .env from the template if missing
+    cmds:
+      - cmd: test -f .env || cp .env.example .env
+
+  install:
+    desc: Install workspace dependencies
     dir: ../..
     cmds:
       - pnpm install --frozen-lockfile
-      - cmd: test -f apps/mobile/.env || cp apps/mobile/.env.example apps/mobile/.env
 
   typecheck:
     cmds:
@@ -26,6 +36,16 @@ tasks:
     desc: Bundle both platforms with Metro/Hermes (no native toolchain needed)
     cmds:
       - npx expo export --platform ios --platform android --output-dir dist
+
+  build:
+    desc: Bundle both platforms with Metro/Hermes into dist/
+    cmds:
+      - task: export
+
+  clean:
+    desc: Remove build output, Expo cache, generated native builds, and test artifacts
+    cmds:
+      - rm -rf dist .expo ios android coverage
 
   prebuild:
     desc: Generate ios/ and android/ (not committed)

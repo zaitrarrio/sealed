@@ -9,6 +9,11 @@ tasks:
     desc: Install dependencies and create .env.local from the template
     cmds:
       - task: install
+      - task: setup:env
+
+  setup:env:
+    desc: Create .env.local from the template if missing
+    cmds:
       - cmd: test -f .env.local || cp .env.example .env.local
 
   install:
@@ -35,6 +40,8 @@ tasks:
   db:migrate:
     desc: Apply the relay's D1 migrations to its local dev database
     dir: "{{.RELAY_DIR}}"
+    env:
+      CI: "true"
     cmds:
       - pnpm wrangler d1 migrations apply sealed-meta-dev --local --env dev
 
@@ -74,4 +81,4 @@ tasks:
   clean:
     desc: Remove build output and test artifacts
     cmds:
-      - rm -rf dist test-results
+      - rm -rf dist test-results coverage

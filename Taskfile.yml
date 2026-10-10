@@ -12,6 +12,95 @@ tasks:
     cmds:
       - pnpm install --frozen-lockfile
 
+  setup:
+    desc: Run all setup tasks (install dependencies and initialize environment files)
+    cmds:
+      - task: install
+      - task: relay:setup:env
+      - task: web:setup:env
+      - task: mobile:setup:env
+
+  setup:all:
+    desc: Run all setup tasks (alias for setup)
+    cmds:
+      - task: setup
+
+  setup:relay:
+    desc: Set up relay service (alias for relay:setup)
+    cmds:
+      - task: relay:setup
+
+  setup:web:
+    desc: Set up web client (alias for web:setup)
+    cmds:
+      - task: web:setup
+
+  setup:mobile:
+    desc: Set up mobile app (alias for mobile:setup)
+    cmds:
+      - task: mobile:setup
+
+  build:
+    desc: Run all build tasks (relay, web, and mobile)
+    cmds:
+      - task: relay:build
+      - task: web:build
+      - task: mobile:build
+
+  build:all:
+    desc: Run all build tasks (alias for build)
+    cmds:
+      - task: build
+
+  build:relay:
+    desc: Build relay Worker to dist/ (alias for relay:build)
+    cmds:
+      - task: relay:build
+
+  build:web:
+    desc: Build web client production bundle to dist/ (alias for web:build)
+    cmds:
+      - task: web:build
+
+  build:mobile:
+    desc: Bundle mobile app for iOS and Android to dist/ (alias for mobile:build)
+    cmds:
+      - task: mobile:build
+
+  clean:
+    desc: Complete clean of build outputs, caches, and test artifacts across all packages
+    cmds:
+      - task: relay:clean
+      - task: web:clean
+      - task: mobile:clean
+      - rm -rf dist coverage target .task packages/*/coverage packages/*/dist
+
+  clean:all:
+    desc: Complete clean across all packages and workspace (alias for clean)
+    cmds:
+      - task: clean
+
+  clean:relay:
+    desc: Clean relay build output and local wrangler state (alias for relay:clean)
+    cmds:
+      - task: relay:clean
+
+  clean:web:
+    desc: Clean web build output and test artifacts (alias for web:clean)
+    cmds:
+      - task: web:clean
+
+  clean:mobile:
+    desc: Clean mobile build output and Expo/native artifacts (alias for mobile:clean)
+    cmds:
+      - task: mobile:clean
+
+  clean:deep:
+    desc: Complete clean plus removal of all node_modules across the monorepo
+    cmds:
+      - task: clean
+      - rm -rf node_modules apps/*/node_modules services/*/node_modules packages/*/node_modules
+
   typecheck:
     desc: Strict typecheck of every package
     cmds:
@@ -32,4 +121,19 @@ tasks:
 
   dev:
     desc: Local relay (:8787) and web client (:5173) together
-    deps: [relay:dev, web:dev]
+    deps: [relay:dev, web:web]
+
+  dev:all:
+    desc: Local relay (:8787) and web client (:5173) together (alias for dev)
+    cmds:
+      - task: dev
+
+  dev:relay:
+    desc: Run the relay locally with wrangler dev (alias for relay:dev)
+    cmds:
+      - task: relay:dev
+
+  dev:web:
+    desc: Run the web client Vite dev server (alias for web:web)
+    cmds:
+      - task: web:web

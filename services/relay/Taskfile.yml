@@ -9,6 +9,11 @@ tasks:
     desc: Install dependencies and create local secrets from the template
     cmds:
       - task: install
+      - task: setup:env
+
+  setup:env:
+    desc: Create local secrets (.dev.vars) from the template if missing
+    cmds:
       - cmd: test -f .dev.vars || cp .env.example .dev.vars
 
   install:
@@ -32,6 +37,11 @@ tasks:
     cmds:
       - pnpm build
 
+  clean:
+    desc: Remove build output, local wrangler state, and test artifacts
+    cmds:
+      - rm -rf dist .wrangler coverage
+
   dev:
     desc: Run the relay locally with wrangler dev (dev environment vars)
     deps: [db:migrate]
@@ -40,6 +50,8 @@ tasks:
 
   db:migrate:
     desc: Apply D1 migrations to the local dev database
+    env:
+      CI: "true"
     cmds:
       - pnpm wrangler d1 migrations apply sealed-meta-dev --local --env dev
 
