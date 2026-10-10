@@ -13,10 +13,11 @@ import { QrCode } from "../../src/components/QrCode";
 import { ReceivedFiles } from "../../src/components/ReceivedFiles";
 import { tierForMeasurement } from "../../src/lib/capability";
 import { codeOrigin } from "../../src/lib/config";
-import type { DecodeProgress, DecodeResult, DecodeSessionOptions } from "../../src/lib/facet-decode";
-import { storeOpened, type ReceivedFile } from "../../src/lib/received";
+import type { DecodeProgress, DecodeSessionOptions } from "../../src/lib/facet-decode";
+import { deleteReceived, storeOpened, type ReceivedFile } from "../../src/lib/received";
+import { describeSender, type SenderView } from "../../src/lib/sender-check";
 import { session, useSession } from "../../src/lib/session";
-import { Button, Card, CheckCode, Notice, P, Screen, Segmented, Spinner, Title, errorMessage } from "../../src/ui/kit";
+import { Button, Card, CheckCode, Notice, P, Row, Screen, Segmented, Spinner, Title, errorMessage } from "../../src/ui/kit";
 
 export default function ReceiveOffline() {
   const s = useSession();
@@ -24,7 +25,7 @@ export default function ReceiveOffline() {
   const [offer, setOffer] = useState<{ code: string; nonce: Uint8Array; tier: Tier } | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [update, setUpdate] = useState<DecodeProgress | null>(null);
-  const [result, setResult] = useState<{ files: ReceivedFile[]; sender: DecodeResult["sender"] } | null>(null);
+  const [result, setResult] = useState<{ files: ReceivedFile[]; sender: SenderView | null; sas: string | null; kept: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastUpdate = useRef<DecodeProgress | null>(null);
 
@@ -44,12 +45,34 @@ export default function ReceiveOffline() {
   };
 
   if (result) {
+    const n = result.files.length;
     return (
       <Screen>
-        <Title eyebrow="Received offline">{result.files.length === 1 ? "Your file is here" : `${result.files.length} files are here`}</Title>
-        {result.sender ? <P>{`From ${result.sender.label}, signed by the sender's device.`}</P> : null}
-        <ReceivedFiles files={result.files} />
-        <Button title="Done" tone="ghost" onPress={() => router.replace("/")} />
+        <Title eyebrow="Received offline">{n === 1 ? "Your file is here" : `${n} files are here`}</Title>
+        {result.sender ? (
+          <P>{result.sender.verified ? `From ${result.sender.display}, a paired contact (signature matches their verified devices).` : `From ${result.sender.display}. Sealed cannot confirm who that is.`}</P>
+        ) : null}
+        {!result.kept && result.sas ? (
+          <Card>
+            <CheckCode value={result.sas} label="Check code — does it match the sender's screen?" testID="airgap-receiver-sas" />
+            <P tone="subtle">If it does not match, the stream was not from the person in front of you. Delete the files.</P>
+            <Row>
+              <Button title="It matches — keep" tone="primary" onPress={() => setResult({ ...result, kept: true })} />
+              <Button
+                title="It does not match — delete"
+                tone="danger"
+                onPress={() => {
+                  void Promise.all(result.files.map((f) => deleteReceived(f.id))).then(() => router.replace("/"));
+                }}
+              />
+            </Row>
+          </Card>
+        ) : (
+          <>
+            <ReceivedFiles files={result.files} />
+            <Button title="Done" tone="ghost" onPress={() => router.replace("/")} />
+          </>
+        )}
       </Screen>
     );
   }
@@ -92,9 +115,13 @@ export default function ReceiveOffline() {
             onComplete={(r) => {
               remember();
               if (!s.keys) return;
-              storeOpened(s.keys.agreement, r.files, r.sender?.label)
-                .then((files) => setResult({ files, sender: r.sender }))
-                .catch((e: unknown) => setError(errorMessage(e)));
+              const keys = s.keys;
+              const sas = lastUpdate.current?.sas ?? null;
+              void (async () => {
+                const sender = await describeSender(r.sender, s.chain).catch(() => null);
+                const files = await storeOpened(keys.agreement, r.files, sender?.display);
+                setResult({ files, sender, sas, kept: false });
+              })().catch((e: unknown) => setError(errorMessage(e)));
             }}
             onError={(m) => {
               remember();
