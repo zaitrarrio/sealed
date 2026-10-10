@@ -64,7 +64,9 @@ function Stage({ sender, onStop, caption }: { sender: FacetSender; onStop: () =>
   const image = useSharedValue<SkImage | null>(null);
   const sideDp = streamSizePx(width, height * 0.8, 1, 8);
   const renderPx = Math.min(MAX_RENDER_PX, streamSizePx(width, height * 0.8, PixelRatio.get(), 8));
-  const lastImage = useRef<SkImage | null>(null);
+  // Recently shown images: the UI thread may still be drawing the previous one, so an image is disposed only
+  // after two newer frames have replaced it.
+  const recent = useRef<SkImage[]>([]);
 
   // Full brightness while streaming; the previous level is restored on exit.
   useEffect(() => {
@@ -94,8 +96,8 @@ function Stage({ sender, onStop, caption }: { sender: FacetSender; onStop: () =>
     const show = (f: FacetFrame) => {
       const next = toSkImage(sender.render(f, renderPx));
       image.value = next;
-      lastImage.current?.dispose();
-      lastImage.current = next;
+      if (next) recent.current.push(next);
+      while (recent.current.length > 3) recent.current.shift()?.dispose();
     };
 
     const tick = (ts: number) => {
@@ -120,8 +122,9 @@ function Stage({ sender, onStop, caption }: { sender: FacetSender; onStop: () =>
 
   useEffect(
     () => () => {
-      lastImage.current?.dispose();
-      lastImage.current = null;
+      image.value = null;
+      // Leave the last frames to the garbage collector: the canvas may still reference them while unmounting.
+      recent.current = [];
     },
     [],
   );
