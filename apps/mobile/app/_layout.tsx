@@ -16,7 +16,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { attachInbox, refreshInbox } from "../src/lib/inbox";
-import { listenForPush } from "../src/lib/push";
+import { launchNotificationRoute, listenForPush } from "../src/lib/push";
 import { session, useSession } from "../src/lib/session";
 import { cryptoReady } from "../src/polyfills";
 import { Notice, P, Screen, Spinner, fonts } from "../src/ui/kit";
@@ -27,6 +27,7 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({ DMSans_400Regular, DMSans_700Bold, Fraunces_400Regular, Fraunces_600SemiBold, JetBrainsMono_400Regular, JetBrainsMono_600SemiBold });
   const [crypto, setCrypto] = useState(false);
   const s = useSession();
+  const ready = (fontsLoaded || fontError !== null) && crypto;
 
   useEffect(() => {
     void cryptoReady.then(() => setCrypto(true));
@@ -37,9 +38,21 @@ export default function RootLayout() {
     attachInbox();
   }, [s.presence, s.active, s.keys]);
 
-  useEffect(() => listenForPush(() => void refreshInbox(), (route) => router.push(route as never)), []);
+  // Notification taps navigate only once the navigator is mounted (status "ready"); a tap that launched the app
+  // is picked up from the last notification response.
+  const [pendingRoute, setPendingRoute] = useState<string | null>(null);
+  useEffect(() => {
+    void launchNotificationRoute().then((r) => r && setPendingRoute(r));
+    return listenForPush(() => void refreshInbox(), setPendingRoute);
+  }, []);
+  useEffect(() => {
+    if (!pendingRoute || s.status !== "ready" || !ready) return;
+    const route = pendingRoute;
+    setPendingRoute(null);
+    // One frame later, so the Stack rendered in this commit has registered with the router.
+    requestAnimationFrame(() => router.push(route as never));
+  }, [pendingRoute, s.status, ready]);
 
-  const ready = (fontsLoaded || fontError !== null) && crypto;
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync().catch(() => undefined);
   }, [ready]);

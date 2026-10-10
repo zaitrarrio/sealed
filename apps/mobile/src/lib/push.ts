@@ -73,3 +73,11 @@ export function listenForPush(onDelivery: () => void, onOpen: (route: string) =>
     rotated.remove();
   };
 }
+
+/** The route of the notification that launched the app (cold start from a tap), if any. */
+export async function launchNotificationRoute(): Promise<string | null> {
+  const r = await Notifications.getLastNotificationResponseAsync().catch(() => null);
+  if (!r) return null;
+  const route = (r.notification.request.content.data as { route?: unknown } | undefined)?.route;
+  return typeof route === "string" && route.startsWith("/") ? route : "/inbox";
+}
