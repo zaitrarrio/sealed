@@ -163,9 +163,13 @@ export function SharePage() {
     setUpload({ done: 0, total, finished: false });
     const ctl = new AbortController();
     abort.current = ctl;
-    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), RELAY_TIMEOUT_MS));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), RELAY_TIMEOUT_MS);
+    });
+    let started: Promise<ShareSession> | null = null;
     try {
-      const started = startShare({
+      started = startShare({
         client: s.client,
         origin: codeOrigin(),
         files: toEnvelopeInputs(files),
@@ -186,6 +190,11 @@ export function SharePage() {
         },
       );
     } catch (e) {
+      // A share that lost the race may still start later: stop its upload and cancel it, so nothing is left behind.
+      if (started) {
+        ctl.abort();
+        void started.then((sh) => sh.cancel()).catch(() => undefined);
+      }
       // New accounts have a lower room cap (ADR-0015); the relay names the limit. Retry once at that cap.
       const limit = e instanceof RelayError && e.status === 403 ? /room cap exceeds your plan limit of (\d+)/.exec(e.message) : null;
       if (asRoom && limit && capOverride === undefined) {
@@ -201,6 +210,7 @@ export function SharePage() {
         offline,
       });
     } finally {
+      clearTimeout(timer);
       setStarting(false);
     }
   };

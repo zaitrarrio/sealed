@@ -176,9 +176,13 @@ export default function Share() {
     setUpload({ done: 0, total, finished: false });
     const ctl = new AbortController();
     abort.current = ctl;
-    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), RELAY_TIMEOUT_MS));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), RELAY_TIMEOUT_MS);
+    });
+    let started: Promise<ShareSession> | null = null;
     try {
-      const started = startShare({
+      started = startShare({
         client: s.client,
         origin: codeOrigin(),
         files: toEnvelopeInputs(files),
@@ -201,6 +205,11 @@ export default function Share() {
       // Auto-approve opens the key's authenticated window once, up front.
       if (asRoom && approval === "auto") void confirmUser("Auto-approve devices joining your room").catch(() => setAutoPaused(true));
     } catch (e) {
+      // A share that lost the race may still start later: stop its upload and cancel it, so nothing is left behind.
+      if (started) {
+        ctl.abort();
+        void started.then((sh) => sh.cancel()).catch(() => undefined);
+      }
       const limit = e instanceof RelayError && e.status === 403 ? /room cap exceeds your plan limit of (\d+)/.exec(e.message) : null;
       if (asRoom && limit && capOverride === undefined) {
         const allowed = Number(limit[1]);
@@ -212,6 +221,7 @@ export default function Share() {
       const offline = !(e instanceof RelayError);
       setStartError({ message: offline ? "Sealed could not reach the relay." : e.message, offline });
     } finally {
+      clearTimeout(timer);
       setStarting(false);
     }
   };

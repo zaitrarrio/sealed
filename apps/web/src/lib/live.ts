@@ -295,6 +295,13 @@ export interface LiveReceiverOptions {
 /** Answers live offers from pinned contacts and receives their Envelopes. Returns a stop function. */
 export function startLiveReceiver(o: LiveReceiverOptions): () => void {
   const sessions = new Map<string, { pc: RTCPeerConnection }>();
+  /** Sinks of transfers still in flight; a transfer that ends without completing keeps nothing. */
+  const pending = new Map<string, { discard?: () => unknown }>();
+  const abandon = (key: string) => {
+    const sink = pending.get(key);
+    pending.delete(key);
+    void Promise.resolve(sink?.discard?.()).catch(() => undefined);
+  };
   const unsubscribe = o.presence.on((frame) => {
     if (frame.type !== "signal") return;
     void handle(frame).catch(() => undefined);
@@ -329,7 +336,10 @@ export function startLiveReceiver(o: LiveReceiverOptions): () => void {
     update({});
     pc.addEventListener("datachannel", (ev) => receiveChannel(ev.channel, dev, frame.from_fp, update, key));
     pc.addEventListener("connectionstatechange", () => {
-      if ((pc.connectionState === "failed" || pc.connectionState === "closed") && state.status !== "done") update({ status: "failed", error: "connection lost" });
+      if ((pc.connectionState === "failed" || pc.connectionState === "closed") && state.status !== "done") {
+        update({ status: "failed", error: "connection lost" });
+        abandon(key);
+      }
     });
     await pc.setRemoteDescription({ type: "offer", sdp: msg.body });
     await pc.setLocalDescription(await pc.createAnswer());
@@ -347,6 +357,7 @@ export function startLiveReceiver(o: LiveReceiverOptions): () => void {
   function receiveChannel(dc: RTCDataChannel, senderDevice: DeviceRecord, fromFp: string, update: (p: Partial<IncomingLive>) => void, key: string): void {
     dc.binaryType = "arraybuffer";
     const sink = o.makeSink(key);
+    pending.set(key, sink);
     const assembler = new SegmentAssembler();
     let hello: Extract<ReturnType<typeof decodeFrame>, { t: "hello" }> | null = null;
     let reader: EnvelopeReader | null = null;
@@ -361,7 +372,7 @@ export function startLiveReceiver(o: LiveReceiverOptions): () => void {
         // closed
       }
       dc.close();
-      void sink.discard?.();
+      abandon(key);
     };
     dc.addEventListener("message", (ev: MessageEvent) => {
       if (!(ev.data instanceof ArrayBuffer)) return;
@@ -397,7 +408,10 @@ export function startLiveReceiver(o: LiveReceiverOptions): () => void {
               dc.send(buf(encodeFrame({ t: "ack", index: seg.index })));
               const total = m.files.reduce((a, x) => a + x.size, 0);
               update({ bytesDone: Math.min(total, Math.round((segmentsDone / m.segmentCount) * total)) });
-              if (last) update({ status: "done" });
+              if (last) {
+                pending.delete(key);
+                update({ status: "done" });
+              }
             }
             return;
           }
@@ -411,5 +425,6 @@ export function startLiveReceiver(o: LiveReceiverOptions): () => void {
     unsubscribe();
     for (const s of sessions.values()) s.pc.close();
     sessions.clear();
+    for (const key of [...pending.keys()]) abandon(key);
   };
 }
