@@ -18,5 +18,6 @@ export * from "./protocol/direct";
 export * from "./protocol/paired";
 export * from "./protocol/pairing";
 export * from "./protocol/live";
+export * from "./sync/contacts";
 export * from "./fec/index";
 export * from "./facet/index";

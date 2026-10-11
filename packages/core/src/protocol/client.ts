@@ -14,8 +14,10 @@ import {
   ErrorBodySchema,
   MailboxResponse,
   OkResponse,
+  PairingReturnResponse,
   Paths,
   PrekeyCountResponse,
+  SyncBlobResponse,
   TransferStatusResponse,
   TurnResponse,
   UploadPrekeysResponse,
@@ -271,5 +273,40 @@ export class RelayClient {
 
   report(req: { transfer_id: string; reason: "malware" | "harassment" | "illegal" | "spam" | "other"; details?: string; evidence_sha256?: string }, claimToken?: string) {
     return this.json(OkResponse, "POST", Paths.reports(), claimToken ? { kind: "bearer", token: claimToken } : { kind: "device" }, req);
+  }
+
+  /** PUT opaque encrypted contacts sync blob (spec §6.3.4). */
+  putSyncBlob(ciphertextB64: string) {
+    const id = this.requireIdentity();
+    return this.json(OkResponse, "PUT", Paths.sync(toB64url(id.fingerprint)), { kind: "device" }, { ciphertext: ciphertextB64 });
+  }
+
+  /** GET opaque encrypted contacts sync blob, or null when none stored. */
+  async getSyncBlob(): Promise<string | null> {
+    const id = this.requireIdentity();
+    try {
+      const r = await this.json(SyncBlobResponse, "GET", Paths.sync(toB64url(id.fingerprint)), { kind: "device" });
+      return r.ciphertext;
+    } catch (e) {
+      if (e instanceof RelayError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /** Post a one-sided pairing return bundle for the peer who showed a code (spec §6.3.3). */
+  postPairingReturn(peerFp: Uint8Array, bundleB64: string) {
+    return this.json(OkResponse, "POST", Paths.pairingReturn(toB64url(peerFp)), { kind: "device" }, { bundle: bundleB64 });
+  }
+
+  /** Poll for a one-sided pairing return bundle addressed to this identity. */
+  async getPairingReturn(): Promise<string | null> {
+    const id = this.requireIdentity();
+    try {
+      const r = await this.json(PairingReturnResponse, "GET", Paths.pairingReturn(toB64url(id.fingerprint)), { kind: "device" });
+      return r.bundle;
+    } catch (e) {
+      if (e instanceof RelayError && e.status === 404) return null;
+      throw e;
+    }
   }
 }

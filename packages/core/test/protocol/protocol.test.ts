@@ -111,10 +111,12 @@ describe("prekeys, paper keys and contacts", () => {
     const fp = randomBytes(32);
     const k = new SoftwareSigningKey();
     const text = encodePaperKey(fp, k);
-    const back = decodePaperKey(text.toLowerCase());
+    // Phrase words are case-insensitive; fingerprint prefix must keep base64url casing.
+    const [fpPart, rest] = text.split(/:\s*/, 2);
+    const back = decodePaperKey(`${fpPart}: ${(rest ?? "").toLowerCase()}`);
     expect(back.fingerprint).toEqual(fp);
     expect(back.key.publicKey).toEqual(k.publicKey);
-    const broken = text.slice(0, 10) + (text[10] === "A" ? "B" : "A") + text.slice(11);
+    const broken = text.replace(/\/ [0-9a-f]{8}$/i, "/ deadbeef");
     expect(() => decodePaperKey(broken)).toThrow(/checksum/);
   });
 

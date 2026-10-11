@@ -3,7 +3,9 @@
  * Mutual scan: each side shows a pairing code, scans the other's, verifies the scanned chain against the
  * fingerprint and head in the code, and both users confirm the same six-digit check code.
  */
-import { concat, ctEqual, toB64url } from "../bytes";
+import { entropyToMnemonic, mnemonicToEntropy, validateMnemonic } from "@scure/bip39";
+import { wordlist as english } from "@scure/bip39/wordlists/english.js";
+import { concat, ctEqual, fromB64url, toB64url } from "../bytes";
 import { asMap, decodeCbor, encodeCbor, getBytes, getText, getUint } from "../cbor";
 import type { KeyProtection, SigningKey } from "../crypto/keys";
 import { SoftwareSigningKey } from "../crypto/keys";
@@ -125,7 +127,7 @@ export async function revokeDevice(client: RelayClient, me: ChainState, signer: 
   return next;
 }
 
-// ------------------------------------------------------------------ paper keys
+// ------------------------------------------------------------------ paper keys (spec §6.3.5 — BIP-39; base32 kept for recovery of older keys)
 
 const B32 = "ABCDEFGHJKMNPQRSTVWXYZ0123456789"; // Crockford-style, no I L O U
 
@@ -163,15 +165,61 @@ function b32decode(s: string): Uint8Array {
   return new Uint8Array(out);
 }
 
-/** Paper key text: base32 of fingerprint ∥ secret ∥ 4-byte checksum, grouped in fives. */
+/** 4-byte binding checksum: SHA-256(fingerprint ∥ secret)[0..4]. */
+export function paperChecksum(fingerprint: Uint8Array, secret: Uint8Array): Uint8Array {
+  return sha256(concat(fingerprint, secret)).slice(0, 4);
+}
+
+/**
+ * BIP-39 paper key (spec §6.3.5): fingerprint prefix, 24-word mnemonic of the signing secret, and a hex
+ * checksum binding the phrase to the identity. Format: `<fp_b64url>: <24 words> / <8 hex>`.
+ */
 export function encodePaperKey(fingerprint: Uint8Array, key: SoftwareSigningKey): string {
+  const phrase = entropyToMnemonic(key.secretKey, english);
+  const sum = [...paperChecksum(fingerprint, key.secretKey)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${toB64url(fingerprint)}: ${phrase} / ${sum}`;
+}
+
+/** Legacy base32 paper key (ADR-0016 §5); still accepted by {@link decodePaperKey}. */
+export function encodePaperKeyBase32(fingerprint: Uint8Array, key: SoftwareSigningKey): string {
   const body = concat(fingerprint, key.secretKey);
   const raw = b32encode(concat(body, sha256(body).slice(0, 4)));
   return raw.match(/.{1,5}/g)!.join("-");
 }
 
 export function decodePaperKey(text: string): { fingerprint: Uint8Array; key: SoftwareSigningKey } {
-  const raw = b32decode(text).slice(0, 68);
+  const trimmed = text.trim();
+  // BIP-39 form: "word word … / aabbccdd" — fingerprint is recovered from the checksum only when the
+  // caller already knows it; for recovery the chain is fetched by scanning — here we require the
+  // fingerprint to be supplied via the checksum binding by storing fingerprint in a prefix form when needed.
+  // Compact BIP-39 recovery: "fp_b64url: phrase / checksum" is also accepted.
+  const fpPrefixed = /^([A-Za-z0-9_-]{43}):\s*(.+)$/.exec(trimmed);
+  if (fpPrefixed) {
+    let fingerprint: Uint8Array;
+    try {
+      fingerprint = fromB64url(fpPrefixed[1]!);
+      if (fingerprint.length !== 32) throw new Error("bad fp");
+    } catch {
+      throw new Error("paper key fingerprint is malformed");
+    }
+    const rest = fpPrefixed[2]!;
+    const bip = /^(.+?)\s*\/\s*([0-9a-fA-F]{8})$/.exec(rest);
+    const phrase = bip?.[1]?.trim().toLowerCase() ?? "";
+    if (!bip || !validateMnemonic(phrase, english)) throw new Error("invalid recovery phrase");
+    const secret = mnemonicToEntropy(phrase, english);
+    const sum = paperChecksum(fingerprint, secret);
+    const expect = bip[2]!.toLowerCase();
+    const got = [...sum].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (expect !== got) throw new Error("paper key checksum mismatch");
+    return { fingerprint, key: new SoftwareSigningKey(secret) };
+  }
+  // Standalone BIP-39 + checksum without fingerprint prefix is not enough to recover the fingerprint;
+  // fall through to legacy base32 which embeds it.
+  const bipOnly = /^(.+?)\s*\/\s*([0-9a-fA-F]{8})$/.exec(trimmed);
+  if (bipOnly && validateMnemonic(bipOnly[1]!.trim(), english)) {
+    throw new Error("recovery phrase needs the identity prefix (scan the QR or paste the full recovery line)");
+  }
+  const raw = b32decode(trimmed).slice(0, 68);
   if (raw.length !== 68) throw new Error("paper key has the wrong length");
   const body = raw.slice(0, 64);
   if (!ctEqual(raw.slice(64), sha256(body).slice(0, 4))) throw new Error("paper key checksum mismatch");
@@ -232,4 +280,46 @@ export async function joinIdentity(client: RelayClient, code: Extract<ParsedCode
   const me = [...chain.devices.values()].find((d) => ctEqual(d.signingPublicKey, mySigningPublicKey) && d.revokedSeq === undefined);
   if (!me) throw new Error("this device has not been added to that identity yet");
   return chain;
+}
+
+// ------------------------------------------------------------------ one-sided pairing (spec §6.3.3)
+
+/**
+ * Return bundle for one-sided pairing: Alice shows a code; Bob scans it and posts this encrypted bundle
+ * to the relay under Alice's fingerprint. Alice's device pulls it and both confirm the same safety code.
+ */
+export interface PairingReturnBundle {
+  version: 1;
+  /** Bob's verified chain links (base64url). */
+  links: string[];
+  nonce: string;
+  label: string;
+  /** Safety code Bob computed; Alice must match. */
+  sas: string;
+}
+
+/** Build the return bundle Bob posts after scanning Alice's pairing code. */
+export function buildPairingReturnBundle(peer: ScannedPeer, bob: ChainState, bobNonce: Uint8Array, bobLabel: string): PairingReturnBundle {
+  const sas = pairingSas(peer.nonce, bobNonce, peer.chain.fingerprint, bob.fingerprint);
+  return {
+    version: 1,
+    links: peer.links.map(toB64url),
+    nonce: toB64url(bobNonce),
+    label: bobLabel,
+    sas,
+  };
+}
+
+/** Alice confirms a return bundle against her local nonce and fingerprint. */
+export function confirmPairingReturnBundle(
+  me: ChainState,
+  myNonce: Uint8Array,
+  bundle: PairingReturnBundle,
+): { peer: ChainState; sas: string; label: string } {
+  const links = bundle.links.map(fromB64url);
+  const peer = verifyChain(links);
+  const bobNonce = fromB64url(bundle.nonce);
+  const sas = pairingSas(myNonce, bobNonce, me.fingerprint, peer.fingerprint);
+  if (sas !== bundle.sas) throw new Error("safety codes do not match");
+  return { peer, sas, label: bundle.label };
 }

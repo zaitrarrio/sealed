@@ -7,7 +7,10 @@ export const MAX_PATH_BYTES = 4096;
 
 export enum Compression {
   None = 0,
-  /** Reserved by spec §8.2; not produced by this implementation (ADR-0016). */
+  /**
+   * zstd (spec §8.2). Produced by the Rust `sealed-core` crate; TypeScript clients still emit DEFLATE
+   * until the WASM binding ships. Readers should accept both.
+   */
   Zstd = 1,
   /** Raw DEFLATE (RFC 1951) via fflate; portable to browsers, Workers and Hermes. */
   Deflate = 2,

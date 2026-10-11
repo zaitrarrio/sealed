@@ -227,6 +227,11 @@ export const ReportRequest = z.object({
 
 export const OkResponse = z.object({ ok: z.literal(true) });
 
+export const SyncBlobResponse = z.object({ ciphertext: z.string().min(1) });
+export const PairingReturnResponse = z.object({ bundle: z.string().min(1) });
+export const PutSyncBlobRequest = z.object({ ciphertext: z.string().min(1).max(512_000) });
+export const PostPairingReturnRequest = z.object({ bundle: z.string().min(1).max(256_000) });
+
 /** Path builders shared by client and relay router. */
 export const Paths = {
   identities: () => `/v1/identities`,
@@ -261,6 +266,10 @@ export const Paths = {
   webauthnAuthOptions: () => `/v1/webauthn/authenticate/options`,
   reports: () => `/v1/reports`,
   health: () => `/v1/health`,
+  /** Opaque encrypted contacts sync blob (spec §6.3.4). */
+  sync: (fp: string) => `/v1/identities/${fp}/sync`,
+  /** One-sided pairing return path (spec §6.3.3). */
+  pairingReturn: (fp: string) => `/v1/identities/${fp}/pairing-return`,
 } as const;
 
 /** Limits shared by client and relay (spec §6.2, §8.3). */
