@@ -1,3 +1,5 @@
+import { isLocalNetworkHost } from "@sealed/core";
+
 /** Build-time configuration (Vite env) plus runtime overrides chosen under Settings. */
 
 const DEFAULT_RELAY = "http://localhost:8787";
@@ -30,9 +32,28 @@ export function codeOrigin(): string {
   return env.publicOrigin || window.location.origin;
 }
 
+let trusted: string[] = [];
+
+/** Origins the user trusted at runtime (kept in Settings; loaded by the session). */
+export function setTrustedOrigins(origins: readonly string[] | undefined): void {
+  trusted = [...(origins ?? [])];
+}
+
 /** Origins whose codes this client accepts. */
 export function acceptedOrigins(): string[] {
-  return [...new Set([window.location.origin, codeOrigin(), ...env.acceptedCodeOrigins])];
+  return [...new Set([window.location.origin, codeOrigin(), ...env.acceptedCodeOrigins, ...trusted])];
+}
+
+/** Normalizes an origin the user is asked to trust: https anywhere, plain http only on local networks. */
+export function trustableOrigin(origin: string): string {
+  let u: URL;
+  try {
+    u = new URL(origin);
+  } catch {
+    throw new Error("That is not a web address.");
+  }
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && isLocalNetworkHost(u.hostname))) throw new Error("Only https addresses (or http on your local network) can be trusted.");
+  return u.origin;
 }
 
 export function driveConfigured(): boolean {

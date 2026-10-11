@@ -6,7 +6,7 @@ import { env, validateRelayUrl } from "../src/lib/config";
 import { registerForPush } from "../src/lib/push";
 import { session, useSession } from "../src/lib/session";
 import { nativeAesGcm } from "../src/polyfills";
-import { Button, Field, H2, Notice, P, ProtectionBadge, Row, Screen, Stack, Title, Toggle, errorMessage } from "../src/ui/kit";
+import { Button, Field, H2, ListRow, Notice, P, ProtectionBadge, Row, Screen, Stack, Title, Toggle, errorMessage } from "../src/ui/kit";
 
 export default function Settings() {
   const s = useSession();
@@ -70,6 +70,18 @@ export default function Settings() {
           />
           <P tone="subtle" mono>{`now: ${s.relayUrl}`}</P>
         </Row>
+      </Stack>
+
+      <Stack>
+        <H2>Trusted web clients</H2>
+        <P>Codes are accepted from {env.publicOrigin}{s.settings.trustedCodeOrigins?.length ? " and the addresses below" : ""}. Add one by scanning a code it made.</P>
+        {(s.settings.trustedCodeOrigins ?? []).map((o) => (
+          <ListRow key={o} right={<Button small tone="ghost" title="Remove" accessibilityLabel={`Stop trusting ${o}`} onPress={() => void session.untrustOrigin(o)} />}>
+            <P tone="default" mono>
+              {o}
+            </P>
+          </ListRow>
+        ))}
       </Stack>
 
       {s.profile.fingerprint ? (

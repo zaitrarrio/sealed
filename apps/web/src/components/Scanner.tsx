@@ -1,9 +1,16 @@
 /**
  * Camera QR scanner with a paste fallback. Calls `onCode` with each decoded text; the parent decides whether it
  * is the code it wanted (returning an error string keeps scanning and shows the message).
+ *
+ * A well-formed Sealed code made by another client origin this browser does not trust yet (for example a phone
+ * app whose codes name https://sealed.to while this client runs on a development server) is not rejected
+ * outright: the scanner names the origin and asks the user to trust it. Trusted origins live in Settings.
  */
 import { useEffect, useRef, useState } from "react";
+import { UnknownOriginError, parseCode } from "@sealed/core";
 import { CameraError, cameraAvailable, continuousFocus, openCamera, scanQr, stopStream } from "../lib/camera";
+import { acceptedOrigins } from "../lib/config";
+import { session } from "../lib/session";
 
 export interface ScannerProps {
   /** Return null to accept (scanning stops), or a message to keep scanning. */
@@ -20,6 +27,7 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
   const [message, setMessage] = useState<string | null>(null);
   const [paste, setPaste] = useState("");
   const [busy, setBusy] = useState(false);
+  const [trustAsk, setTrustAsk] = useState<{ text: string; origin: string } | null>(null);
   const handling = useRef(false);
   const lastText = useRef<string>("");
   const onCodeRef = useRef(onCode);
@@ -32,6 +40,16 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
     handling.current = true;
     setBusy(true);
     try {
+      try {
+        parseCode(text, acceptedOrigins());
+      } catch (e) {
+        if (e instanceof UnknownOriginError) {
+          setMessage(null);
+          setTrustAsk({ text, origin: e.origin });
+          return false;
+        }
+        // Anything else is the screen's to explain.
+      }
       const err = await onCodeRef.current(text);
       setMessage(err);
       return err === null;
@@ -106,6 +124,52 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
               Start camera
             </button>
           )}
+        </div>
+      )}
+      {trustAsk && (
+        <div className="card stack" role="alertdialog" aria-labelledby="trust-origin-title">
+          <p id="trust-origin-title" style={{ margin: 0 }}>
+            This code was made by <strong className="mono">{trustAsk.origin}</strong>, which this browser has not been set up to trust.
+          </p>
+          <p className="subtle" style={{ margin: 0 }}>
+            Trust it only if you know it is a Sealed client you use (for example the Sealed phone app, or your organization's deployment). You can remove it later in Settings.
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              className="btn primary"
+              data-testid="trust-origin"
+              onClick={() => {
+                const ask = trustAsk;
+                setTrustAsk(null);
+                void session
+                  .trustOrigin(ask.origin)
+                  .then(() => {
+                    lastText.current = "";
+                    return handle(ask.text, false);
+                  })
+                  .then((ok) => {
+                    if (ok) {
+                      setPaste("");
+                      setActive(false);
+                    }
+                  })
+                  .catch((e: unknown) => setMessage(e instanceof Error ? e.message : String(e)));
+              }}
+            >
+              Trust and continue
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                setTrustAsk(null);
+                lastText.current = "";
+              }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
       {active && <p className="subtle">{label}</p>}

@@ -6,7 +6,7 @@ import { claimSas } from "../../src/crypto/sas";
 import { unwrapKey, wrapKey } from "../../src/crypto/wrap";
 import { createIdentity } from "../../src/identity/sigchain";
 import { parseSignatureHeader, signRequest, verifyRequestSignature } from "../../src/protocol/auth";
-import { claimCode, parseCode, reverseKeyCode, CodeError } from "../../src/protocol/codes";
+import { claimCode, isLocalNetworkHost, parseCode, reverseKeyCode, CodeError, UnknownOriginError } from "../../src/protocol/codes";
 import { SegmentAssembler, decodeFrame, decodeSignal, dtlsMatches, encodeFrame, encodeSignal, segmentFrames } from "../../src/protocol/live";
 import { generatePrekeys, verifyPrekey } from "../../src/protocol/paired";
 import { addDeviceCheckCode, createAddDeviceOffer, createPairingOffer, decodeContacts, decodePaperKey, encodeContacts, encodePaperKey } from "../../src/protocol/pairing";
@@ -43,6 +43,29 @@ describe("codes", () => {
     expect(() => parseCode(code, ["https://other.example"])).toThrow(CodeError);
     expect(() => parseCode(code.replace("https:", "http:"))).toThrow(CodeError);
     expect(() => parseCode(code.split("#")[0]!)).toThrow(CodeError);
+  });
+
+  it("reports the origin of a well-formed code from an origin the caller does not accept", () => {
+    const code = claimCode("http://192.168.1.10:5173", randomBytes(16), randomBytes(16));
+    let err: unknown;
+    try {
+      parseCode(code, ["https://sealed.to"]);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UnknownOriginError);
+    expect((err as UnknownOriginError).origin).toBe("http://192.168.1.10:5173");
+    expect((err as UnknownOriginError).kind).toBe("claim");
+    // Accepted once the origin is allowed; malformed codes never become UnknownOriginError.
+    expect(parseCode(code, ["https://sealed.to", "http://192.168.1.10:5173"]).kind).toBe("claim");
+    expect(() => parseCode("http://192.168.1.10:5173/c/short#x", ["https://sealed.to"])).toThrow(CodeError);
+    expect(() => parseCode("http://192.168.1.10:5173/c/short#x", ["https://sealed.to"])).not.toThrow(UnknownOriginError);
+  });
+
+  it("accepts plain http only for this machine and private networks", () => {
+    for (const h of ["localhost", "127.0.0.1", "10.0.0.5", "172.16.4.2", "172.31.255.1", "192.168.1.10", "169.254.3.3", "studio.local", "[::1]"]) expect(isLocalNetworkHost(h)).toBe(true);
+    for (const h of ["sealed.to", "8.8.8.8", "172.32.0.1", "192.169.0.1", "11.0.0.1"]) expect(isLocalNetworkHost(h)).toBe(false);
+    expect(() => parseCode(claimCode("http://example.com", randomBytes(16), randomBytes(16)))).toThrow(/https/);
   });
 });
 

@@ -51,6 +51,15 @@ Universal links need the web origin to serve `/.well-known/apple-app-site-associ
 `/.well-known/assetlinks.json` naming this app's team / package and signing certificate (see
 `apps/web/public/.well-known/`).
 
+## Codes from a development web client
+
+Every code names the web origin that made it, and each client accepts only origins it trusts. The phone app
+trusts `EXPO_PUBLIC_WEB_ORIGIN` (default `https://sealed.to`) plus `EXPO_PUBLIC_ACCEPTED_CODE_ORIGINS`. A web
+client on your LAN stamps codes with its own address (e.g. `http://192.168.1.10:5173`), so the first scan of
+one of its codes shows "This code was made by … — Trust and continue". Trusted addresses are listed under
+Settings → Trusted web clients and can be removed there. To skip the prompt, add the dev server's address to
+`EXPO_PUBLIC_ACCEPTED_CODE_ORIGINS` (or set `VITE_PUBLIC_ORIGIN` on the web client to match the app).
+
 ## Checks
 
 ```sh

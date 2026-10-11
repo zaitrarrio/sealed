@@ -1,3 +1,5 @@
+import { isLocalNetworkHost } from "@sealed/core";
+
 /** Build-time configuration (EXPO_PUBLIC_* env, inlined by Metro) plus runtime overrides chosen under Settings. */
 
 const DEFAULT_RELAY = "http://localhost:8787";
@@ -25,9 +27,31 @@ export function codeOrigin(): string {
   return env.publicOrigin;
 }
 
-/** Origins whose codes this app accepts. */
+let trusted: string[] = [];
+
+/** Origins the user trusted at runtime (kept in Settings; loaded by the session). */
+export function setTrustedOrigins(origins: readonly string[] | undefined): void {
+  trusted = [...(origins ?? [])];
+}
+
+/** Origins whose codes this app accepts: the build's own, the build's extra list, and the user's trusted ones. */
 export function acceptedOrigins(): string[] {
-  return [...new Set([codeOrigin(), ...env.acceptedCodeOrigins])];
+  return [...new Set([codeOrigin(), ...env.acceptedCodeOrigins, ...trusted])];
+}
+
+/**
+ * Normalizes an origin the user is asked to trust. https anywhere; plain http only for this device and private
+ * networks (a development web client on the LAN), matching what code parsing accepts.
+ */
+export function trustableOrigin(origin: string): string {
+  let u: URL;
+  try {
+    u = new URL(origin);
+  } catch {
+    throw new Error("That is not a web address.");
+  }
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && isLocalNetworkHost(u.hostname))) throw new Error("Only https addresses (or http on your local network) can be trusted.");
+  return u.origin;
 }
 
 export function validateRelayUrl(input: string): string {
@@ -37,7 +61,7 @@ export function validateRelayUrl(input: string): string {
   } catch {
     throw new Error("Enter a full URL, for example https://relay.sealed.to");
   }
-  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1" || /^10\.|^192\.168\./.test(u.hostname);
+  const local = isLocalNetworkHost(u.hostname);
   if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) throw new Error("The relay must use https (http is allowed only for local development)");
   if (u.search || u.hash) throw new Error("The relay URL cannot have a query or fragment");
   return trim(u.origin + u.pathname);

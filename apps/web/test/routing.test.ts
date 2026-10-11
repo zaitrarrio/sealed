@@ -1,5 +1,5 @@
 import { addDeviceCode, claimCode, pairingCode, randomBytes, reverseKeyCode, SoftwareAgreementKey, toB64url } from "@sealed/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { codeFromLocation, describeKind, expectCode, friendlyCodeError, routeCode } from "../src/lib/routing";
 
 const ORIGIN = "https://sealed.to";
@@ -35,7 +35,7 @@ describe("code routing", () => {
   it("rejects codes from untrusted origins, non-codes and incomplete codes", () => {
     const evil = claimCode("https://evil.example", randomBytes(16), randomBytes(16));
     expect(() => routeCode(evil, ACCEPTED)).toThrow(/unknown origin/);
-    expect(friendlyCodeError(catchErr(() => routeCode(evil, ACCEPTED)))).toBe("That code comes from a site this app does not trust.");
+    expect(friendlyCodeError(catchErr(() => routeCode(evil, ACCEPTED)))).toBe("That code was made by https://evil.example, which this app does not trust yet.");
     expect(friendlyCodeError(catchErr(() => routeCode("hello", ACCEPTED)))).toBe("That is not a Sealed code.");
     const noSecret = claimCode(ORIGIN, randomBytes(16), randomBytes(16)).split("#")[0]!;
     expect(friendlyCodeError(catchErr(() => routeCode(noSecret, ACCEPTED)))).toBe("That code is incomplete. Scan it again.");
@@ -62,3 +62,21 @@ function catchErr(fn: () => unknown): unknown {
   }
   throw new Error("expected a throw");
 }
+
+describe("trusted code origins", () => {
+  it("accepts another client's codes once its origin is trusted", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://localhost:5173" } });
+    const { acceptedOrigins, setTrustedOrigins, trustableOrigin } = await import("../src/lib/config");
+    const phone = claimCode("https://sealed.to", randomBytes(16), randomBytes(16));
+    setTrustedOrigins([]);
+    const before = acceptedOrigins().filter((o) => o !== "https://sealed.to");
+    expect(() => routeCode(phone, before)).toThrow(/unknown origin/);
+    setTrustedOrigins([trustableOrigin("https://sealed.to/")]);
+    expect(acceptedOrigins()).toContain("https://sealed.to");
+    expect(routeCode(phone, acceptedOrigins()).parsed.kind).toBe("claim");
+    expect(() => trustableOrigin("http://sealed.to")).toThrow(/https/);
+    expect(trustableOrigin("http://192.168.1.10:5173")).toBe("http://192.168.1.10:5173");
+    setTrustedOrigins([]);
+    vi.unstubAllGlobals();
+  });
+});

@@ -26,6 +26,30 @@ export class CodeError extends Error {
   }
 }
 
+/**
+ * A well-formed Sealed code whose origin is not in the caller's allow-list. The code itself parsed cleanly, so a
+ * client can show the origin and let the user decide to trust it (e.g. a development or self-hosted web client).
+ */
+export class UnknownOriginError extends CodeError {
+  constructor(
+    readonly origin: string,
+    readonly kind: ParsedCode["kind"],
+  ) {
+    super(`code is from an unknown origin ${origin}`);
+    this.name = "UnknownOriginError";
+  }
+}
+
+/** Hosts for which plain http is accepted: this machine and private (RFC 1918 / link-local / mDNS) networks. */
+export function isLocalNetworkHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (h === "localhost" || h === "::1" || h.endsWith(".local")) return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
 function trimOrigin(origin: string): string {
   return origin.replace(/\/+$/, "");
 }
@@ -51,8 +75,17 @@ export function reverseKeyCode(origin: string, p: { receiverPublicKey: Uint8Arra
 
 const PROTECTIONS: readonly KeyProtection[] = ["secure-enclave", "strongbox", "tee", "browser", "software"];
 
-/** Parses any Sealed code. `allowedOrigins`, when given, rejects codes from other hosts. */
+/**
+ * Parses any Sealed code. `allowedOrigins`, when given, rejects well-formed codes from other hosts with
+ * UnknownOriginError (checked after the code itself parsed, so the error always describes a genuine code).
+ */
 export function parseCode(text: string, allowedOrigins?: readonly string[]): ParsedCode {
+  const parsed = parseAnyOrigin(text);
+  if (allowedOrigins && !allowedOrigins.map(trimOrigin).includes(parsed.origin)) throw new UnknownOriginError(parsed.origin, parsed.kind);
+  return parsed;
+}
+
+function parseAnyOrigin(text: string): ParsedCode {
   let url: URL;
   try {
     url = new URL(text.trim());
@@ -60,8 +93,9 @@ export function parseCode(text: string, allowedOrigins?: readonly string[]): Par
     throw new CodeError("not a Sealed code");
   }
   const origin = url.origin;
-  if (allowedOrigins && !allowedOrigins.map(trimOrigin).includes(origin)) throw new CodeError(`code is from an unknown origin ${origin}`);
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1"))) {
+  // The origin only routes a phone camera to the right app or page; the secret travels in the fragment, which no
+  // client sends anywhere. Plain http is therefore accepted for local development hosts.
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalNetworkHost(url.hostname))) {
     throw new CodeError("codes must use https");
   }
   const frag = url.hash.replace(/^#/, "");

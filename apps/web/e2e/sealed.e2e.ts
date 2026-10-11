@@ -264,3 +264,21 @@ test.describe.serial("Sealed web client against a local relay", () => {
     await r2.close();
   });
 });
+
+test("a code made by another Sealed client origin asks to trust it, then routes; Settings lists it", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: APP });
+  const page = await context.newPage();
+  const b64u = (b: Buffer) => b.toString("base64url");
+  const foreign = `https://phone-origin.example/c/${b64u(randomBytes(16))}#${b64u(randomBytes(16))}`;
+  await page.goto("/receive");
+  await page.getByTestId("paste-code").fill(foreign);
+  await page.getByRole("button", { name: "Use this code" }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("https://phone-origin.example");
+  await page.getByTestId("trust-origin").click();
+  // Routed to the claim screen; the transfer does not exist on this relay, so the claim ends cleanly.
+  await expect(page).toHaveURL(/\/c\//);
+  await expect(page.getByTestId("claim-ended")).toBeVisible();
+  await page.goto("/settings");
+  await expect(page.getByRole("list", { name: "Trusted origins" })).toContainText("https://phone-origin.example");
+  await context.close();
+});

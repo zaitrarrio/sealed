@@ -25,6 +25,8 @@ export interface Settings {
   /** Key gating chosen at onboarding: biometrics only, or biometrics with passcode fallback. */
   keyPolicy?: KeyPolicy;
   reduceMotion?: boolean;
+  /** Web client origins the user chose to trust for codes (development or self-hosted deployments). */
+  trustedCodeOrigins?: string[];
   /** Last measured optical decode performance, used to choose the capability tier of the next key code. */
   opticalMeasurement?: { captureFps: number; decodeMsPerFrame: number; at: number };
 }

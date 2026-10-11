@@ -22,7 +22,7 @@ import {
   type ChainState,
 } from "@sealed/core";
 import { useSyncExternalStore } from "react";
-import { env } from "./config";
+import { env, setTrustedOrigins, trustableOrigin } from "./config";
 import { encodeChainLinks, loadOrCreateDeviceKeys, loadProfile, loadSettings, saveProfile, saveSettings, verifyCachedChain, type Profile, type Settings } from "./device-store";
 import { IdbPrekeyStore } from "./prekey-store";
 import { PresenceSocket } from "./presence";
@@ -96,6 +96,7 @@ class Session {
       this.prekeys = new IdbPrekeyStore(keys.agreement);
       const relayUrl = settings.relayUrl || env.relayUrl;
       const chain = verifyCachedChain(profile);
+      setTrustedOrigins(settings.trustedCodeOrigins);
       this.set({ keys, profile, settings, relayUrl, chain, status: "ready" });
       this.rebuildClient();
       if (chain) void this.refreshOwnChain().catch(() => undefined);
@@ -147,7 +148,20 @@ class Session {
   async updateSettings(patch: Partial<Settings>): Promise<void> {
     const settings = { ...this.state.settings, ...patch };
     await saveSettings(settings);
+    setTrustedOrigins(settings.trustedCodeOrigins);
     this.set({ settings });
+  }
+
+  /** Accepts codes from `origin` from now on (the user confirmed it). */
+  async trustOrigin(origin: string): Promise<string> {
+    const o = trustableOrigin(origin);
+    const list = this.state.settings.trustedCodeOrigins ?? [];
+    if (!list.includes(o)) await this.updateSettings({ trustedCodeOrigins: [...list, o] });
+    return o;
+  }
+
+  async untrustOrigin(origin: string): Promise<void> {
+    await this.updateSettings({ trustedCodeOrigins: (this.state.settings.trustedCodeOrigins ?? []).filter((o) => o !== origin) });
   }
 
   // ------------------------------------------------------------ identity

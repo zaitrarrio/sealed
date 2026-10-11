@@ -77,3 +77,31 @@ describe("code stash and routing", () => {
     expect(() => inAppRouteFor(claim, [ORIGIN])).toThrow(CodeError);
   });
 });
+
+describe("trusted code origins", () => {
+  it("accepts a web client's codes only after its origin is trusted, and explains the rejection", async () => {
+    const { acceptedOrigins, setTrustedOrigins, trustableOrigin } = await import("../src/lib/config");
+    const { friendlyCodeError } = await import("../src/lib/routing");
+    const lan = "http://192.168.1.10:5173";
+    const code = claimCode(lan, randomBytes(16), randomBytes(16));
+    setTrustedOrigins([]);
+    let message = "";
+    try {
+      inAppRouteFor(code, acceptedOrigins());
+    } catch (e) {
+      message = friendlyCodeError(e);
+    }
+    expect(message).toBe(`That code was made by ${lan}, which this app does not trust yet.`);
+    setTrustedOrigins([trustableOrigin(`${lan}/`)]);
+    expect(inAppRouteFor(code, acceptedOrigins()).startsWith("/c/")).toBe(true);
+    setTrustedOrigins([]);
+  });
+
+  it("trusts https anywhere but plain http only on local networks", async () => {
+    const { trustableOrigin } = await import("../src/lib/config");
+    expect(trustableOrigin("https://files.example.org/path")).toBe("https://files.example.org");
+    expect(trustableOrigin("http://10.0.0.4:5173")).toBe("http://10.0.0.4:5173");
+    expect(() => trustableOrigin("http://files.example.org")).toThrow(/https/);
+    expect(() => trustableOrigin("not a url")).toThrow();
+  });
+});

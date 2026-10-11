@@ -4,7 +4,7 @@
  * serves exactly those paths, so a phone's camera app opens the right screen directly; scans and pastes inside
  * the app are routed to the same paths. Fragments never leave the browser.
  */
-import { CodeError, parseCode, type ParsedCode } from "@sealed/core";
+import { CodeError, UnknownOriginError, parseCode, type ParsedCode } from "@sealed/core";
 
 export const CODE_PATHS = {
   claim: (transferId: string) => `/c/${transferId}`,
@@ -58,7 +58,7 @@ export function friendlyCodeError(e: unknown): string {
   if (e instanceof CodeError) {
     const m = e.message;
     if (m.startsWith("not a Sealed code")) return "That is not a Sealed code.";
-    if (m.startsWith("code is from an unknown origin")) return "That code comes from a site this app does not trust.";
+    if (e instanceof UnknownOriginError) return `That code was made by ${e.origin}, which this app does not trust yet.`;
     if (m.startsWith("code is missing its secret")) return "That code is incomplete. Scan it again.";
     return m.endsWith(".") ? m : `${m}.`;
   }

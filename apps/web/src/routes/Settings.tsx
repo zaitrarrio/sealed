@@ -122,6 +122,25 @@ export function SettingsPage() {
         </section>
       )}
 
+      <section className="stack">
+        <h2>Trusted Sealed clients</h2>
+        <p className="muted">
+          Codes made by this site are always accepted{s.settings.trustedCodeOrigins?.length ? ", and so are codes from the addresses below" : ""}. Add another by scanning a code it made.
+        </p>
+        {(s.settings.trustedCodeOrigins ?? []).length > 0 && (
+          <ul className="list" aria-label="Trusted origins">
+            {(s.settings.trustedCodeOrigins ?? []).map((o) => (
+              <li key={o}>
+                <span className="grow mono">{o}</span>
+                <button type="button" className="btn small ghost" aria-label={`Stop trusting ${o}`} onClick={() => void session.untrustOrigin(o)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <nav className="row">
         {s.profile.fingerprint && (
           <Link to="/devices" className="btn ghost">

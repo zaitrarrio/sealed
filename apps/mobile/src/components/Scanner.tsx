@@ -2,6 +2,10 @@
  * Camera QR scanner (VisionCamera object output, the platform's native barcode detector) with a paste fallback.
  * `onCode` receives each decoded text; returning null accepts it (scanning stops), a string keeps scanning and
  * shows the message.
+ *
+ * A well-formed Sealed code made by a web client this app does not trust yet (a development server on the LAN,
+ * a self-hosted deployment) is not rejected outright: the scanner names the origin and asks the user to trust
+ * it. Trusted origins are kept in Settings, where they can be removed.
  */
 import { color, radius } from "@sealed/tokens";
 import * as Clipboard from "expo-clipboard";
@@ -10,7 +14,10 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Camera, useCameraDevice, useCameraPermission, useObjectOutput, type ScannedObject, type ScannedObjectType } from "react-native-vision-camera";
 import { useAppActive } from "../lib/app-state";
-import { Button, Field, Notice, P, Row, Spinner } from "../ui/kit";
+import { UnknownOriginError, parseCode } from "@sealed/core";
+import { acceptedOrigins } from "../lib/config";
+import { session } from "../lib/session";
+import { B, Button, Card, Field, Notice, P, Row, Spinner, errorMessage } from "../ui/kit";
 
 const QR_TYPES: ScannedObjectType[] = ["qr"];
 
@@ -29,6 +36,7 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
   const [busy, setBusy] = useState(false);
   const [paste, setPaste] = useState("");
   const [accepted, setAccepted] = useState(false);
+  const [trustAsk, setTrustAsk] = useState<{ text: string; origin: string } | null>(null);
   const handling = useRef(false);
   const lastText = useRef("");
   const onCodeRef = useRef(onCode);
@@ -41,6 +49,16 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
     handling.current = true;
     setBusy(true);
     try {
+      try {
+        parseCode(text, acceptedOrigins());
+      } catch (e) {
+        if (e instanceof UnknownOriginError) {
+          setMessage(null);
+          setTrustAsk({ text, origin: e.origin });
+          return;
+        }
+        // Anything else is the screen's to explain.
+      }
       const err = await onCodeRef.current(text);
       setMessage(err);
       if (err === null) setAccepted(true);
@@ -66,7 +84,18 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
   });
 
   const outputs = useMemo(() => [output], [output]);
-  const cameraOn = hasPermission && device !== undefined && focused && appActive && !accepted;
+  const cameraOn = hasPermission && device !== undefined && focused && appActive && !accepted && trustAsk === null;
+
+  const trustAndContinue = (ask: { text: string; origin: string }) => {
+    setTrustAsk(null);
+    void session
+      .trustOrigin(ask.origin)
+      .then(() => {
+        lastText.current = "";
+        return handle(ask.text, false);
+      })
+      .catch((e: unknown) => setMessage(errorMessage(e)));
+  };
 
   return (
     <View style={{ gap: 12 }}>
@@ -87,6 +116,27 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
           <View style={styles.reticle} pointerEvents="none" />
         </View>
       )}
+      {trustAsk ? (
+        <Card>
+          <P tone="default">
+            This code was made by <B>{trustAsk.origin}</B>, which this app has not been set up to trust.
+          </P>
+          <P tone="subtle">
+            Trust it only if you know this is your own Sealed web client (for example a development server or your organization's deployment). You can remove it later in Settings.
+          </P>
+          <Row>
+            <Button title="Trust and continue" tone="primary" onPress={() => trustAndContinue(trustAsk)} testID="trust-origin" />
+            <Button
+              title="Cancel"
+              tone="ghost"
+              onPress={() => {
+                setTrustAsk(null);
+                lastText.current = "";
+              }}
+            />
+          </Row>
+        </Card>
+      ) : null}
       <P tone="subtle">{label}</P>
       {busy ? <Spinner label="Checking the code…" /> : null}
       {message ? <Notice tone="danger">{message}</Notice> : null}

@@ -24,6 +24,8 @@ export interface Profile {
 export interface Settings {
   relayUrl?: string;
   pushEnabled?: boolean;
+  /** Other Sealed client origins the user chose to trust for codes (e.g. sealed.to codes on a dev server). */
+  trustedCodeOrigins?: string[];
 }
 
 /** Loads this browser's device keys, generating and persisting them on first use (receivers need no account). */
