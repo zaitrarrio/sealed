@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel typecheck",
     "test": "pnpm -r test",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "eas-build-post-install": "pnpm --filter @sealed/mobile run eas-build-post-install"
   },
   "devDependencies": {
     "typescript": "5.9.3",

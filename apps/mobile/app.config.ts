@@ -22,7 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const { host, scheme } = originHost(webOrigin);
   const bundleId = process.env.SEALED_IOS_BUNDLE_ID || "to.sealed.app";
   const androidPackage = process.env.SEALED_ANDROID_PACKAGE || "to.sealed.app";
-  const easProjectId = process.env.EAS_PROJECT_ID;
+  const easProjectId = process.env.EAS_PROJECT_ID || "15d98f48-61d9-4c0d-959e-5fc35ba6d212";
   const appleTeamId = process.env.SEALED_APPLE_TEAM_ID;
 
   // Android: one verified filter per code path. pathPrefix "/c/" covers claim codes; the others are exact paths.
@@ -37,6 +37,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: "Sealed",
     slug: "sealed",
+    owner: "advanced-ai",
     scheme: "sealed",
     version: "0.1.0",
     orientation: "portrait",

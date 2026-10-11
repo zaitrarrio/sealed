@@ -42,6 +42,21 @@ tasks:
     cmds:
       - task: export
 
+  build:eas:ios:
+    desc: Trigger an EAS development build for physical iOS devices
+    cmds:
+      - npx eas-cli build --profile development --platform ios
+
+  build:eas:sim:
+    desc: Trigger an EAS development build for iOS Simulator
+    cmds:
+      - npx eas-cli build --profile development:simulator --platform ios
+
+  build:eas:android:
+    desc: Trigger an EAS development build for Android
+    cmds:
+      - npx eas-cli build --profile development --platform android
+
   clean:
     desc: Remove build output, Expo cache, generated native builds, and test artifacts
     cmds:

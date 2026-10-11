@@ -15,6 +15,11 @@
     "export": "expo export --platform ios --platform android --output-dir dist",
     "export:ios": "expo export --platform ios --output-dir dist/ios",
     "export:android": "expo export --platform android --output-dir dist/android",
+    "build:eas:ios": "eas build --profile development --platform ios",
+    "build:eas:sim": "eas build --profile development:simulator --platform ios",
+    "build:eas:android": "eas build --profile development --platform android",
+    "eas-build-post-install": "install-skia",
+    "postinstall": "install-skia",
     "prebuild": "expo prebuild --no-install --clean"
   },
   "dependencies": {

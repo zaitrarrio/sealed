@@ -7,6 +7,12 @@
       "env": { "EXPO_PUBLIC_RELAY_URL": "http://192.168.1.10:8787", "EXPO_PUBLIC_WEB_ORIGIN": "https://sealed.to" },
       "ios": { "simulator": false }
     },
+    "development:simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "EXPO_PUBLIC_RELAY_URL": "http://192.168.1.10:8787", "EXPO_PUBLIC_WEB_ORIGIN": "https://sealed.to" },
+      "ios": { "simulator": true }
+    },
     "preview": {
       "distribution": "internal",
       "env": { "EXPO_PUBLIC_RELAY_URL": "https://relay.staging.sealed.to", "EXPO_PUBLIC_WEB_ORIGIN": "https://staging.sealed.to" }

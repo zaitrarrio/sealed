@@ -8,10 +8,30 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "allowJs": false,
-    "types": ["react-native"],
-    "lib": ["ES2023", "DOM"],
+    "types": [
+      "react-native"
+    ],
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
     "jsx": "react-jsx"
   },
-  "include": ["index.ts", "app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx", "modules/sealed-keystore/**/*.ts", "test/**/*.ts", "app.config.ts", "expo-env.d.ts", "vitest.config.mts"],
-  "exclude": ["node_modules", "dist", "ios", "android"]
+  "include": [
+    "index.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "modules/sealed-keystore/**/*.ts",
+    "test/**/*.ts",
+    "app.config.ts",
+    "vitest.config.mts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "ios",
+    "android"
+  ]
 }
