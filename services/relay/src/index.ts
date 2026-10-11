@@ -14,7 +14,9 @@ import {
   HARDWARE_PROTECTIONS,
   Limits,
   Paths,
+  PostPairingReturnRequest,
   PushRegistration,
+  PutSyncBlobRequest,
   ReportRequest,
   UploadPrekeysRequest,
   WebAuthnRegisterVerifyRequest,
@@ -177,6 +179,39 @@ app.post(Paths.links(":fp"), async (c) => {
   const auth = await deviceAuth(c, { links });
   if (auth.fp !== fp) throw Errors.forbidden("may only append to your own identity");
   return c.json({ head_seq: auth.headSeq });
+});
+
+app.put(Paths.sync(":fp"), async (c) => {
+  const fp = param(c, "fp", FINGERPRINT_BYTES);
+  const { ciphertext } = parse(PutSyncBlobRequest, await jsonBody(c));
+  const auth = await deviceAuth(c);
+  if (auth.fp !== fp) throw Errors.forbidden("may only write your own sync blob");
+  unwrap(await identity(c.env, fp).putSyncBlob(fp, ciphertext));
+  return c.json({ ok: true });
+});
+
+app.get(Paths.sync(":fp"), async (c) => {
+  const fp = param(c, "fp", FINGERPRINT_BYTES);
+  const auth = await deviceAuth(c);
+  if (auth.fp !== fp) throw Errors.forbidden("may only read your own sync blob");
+  c.header("cache-control", "no-store");
+  return c.json(unwrap(await identity(c.env, fp).getSyncBlob(fp)));
+});
+
+app.post(Paths.pairingReturn(":fp"), async (c) => {
+  const fp = param(c, "fp", FINGERPRINT_BYTES);
+  const { bundle } = parse(PostPairingReturnRequest, await jsonBody(c));
+  const auth = await deviceAuth(c);
+  unwrap(await identity(c.env, fp).postPairingReturn(auth.fp, bundle));
+  return c.json({ ok: true });
+});
+
+app.get(Paths.pairingReturn(":fp"), async (c) => {
+  const fp = param(c, "fp", FINGERPRINT_BYTES);
+  const auth = await deviceAuth(c);
+  if (auth.fp !== fp) throw Errors.forbidden("may only read your own pairing return");
+  c.header("cache-control", "no-store");
+  return c.json(unwrap(await identity(c.env, fp).getPairingReturn(fp)));
 });
 
 app.post(Paths.prekeys(":fp"), async (c) => {

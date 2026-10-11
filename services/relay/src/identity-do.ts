@@ -100,8 +100,8 @@ export class IdentityDO extends DurableObject<Env> {
   }
 
   private ensureSchema(): void {
-    if (this.hasSchema) return;
-    this.sql.exec(`
+    if (!this.hasSchema) {
+      this.sql.exec(`
       CREATE TABLE IF NOT EXISTS links (seq INTEGER PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
@@ -113,7 +113,13 @@ export class IdentityDO extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS challenges (challenge TEXT PRIMARY KEY, kind TEXT NOT NULL, action TEXT NOT NULL, expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS watchers (fp TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
     `);
-    this.hasSchema = true;
+      this.hasSchema = true;
+    }
+    // Additive tables for sync + one-sided pairing (safe on already-initialized DOs).
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS sync_blob (k INTEGER PRIMARY KEY CHECK (k = 1), ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS pairing_return (bundle TEXT NOT NULL, from_fp TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+    `);
   }
 
   // ------------------------------------------------------------------ chain
@@ -545,9 +551,58 @@ export class IdentityDO extends DurableObject<Env> {
 
   // ------------------------------------------------------------------ expiry
 
+  // ------------------------------------------------------------------ contacts sync + one-sided pairing (spec §6.3.3–6.3.4)
+
+  /** Store an opaque encrypted contacts sync blob. Only members of this identity may write. */
+  async putSyncBlob(fp: string, ciphertext: string): Promise<Result<true>> {
+    this.ensureSchema();
+    const state = this.load();
+    if (!state || toB64url(state.fingerprint) !== fp) return fail(404, "not_found", "unknown identity");
+    if (ciphertext.length > 512_000) return fail(413, "too_large", "sync blob too large");
+    this.sql.exec("INSERT INTO sync_blob (k, ciphertext, updated_at) VALUES (1, ?, ?) ON CONFLICT(k) DO UPDATE SET ciphertext = excluded.ciphertext, updated_at = excluded.updated_at", ciphertext, nowSeconds());
+    return ok(true);
+  }
+
+  async getSyncBlob(fp: string): Promise<Result<{ ciphertext: string }>> {
+    this.ensureSchema();
+    const state = this.load();
+    if (!state || toB64url(state.fingerprint) !== fp) return fail(404, "not_found", "unknown identity");
+    const row = this.sql.exec<{ ciphertext: string }>("SELECT ciphertext FROM sync_blob WHERE k = 1").toArray()[0];
+    if (!row) return fail(404, "not_found", "no sync blob");
+    return ok({ ciphertext: row.ciphertext });
+  }
+
+  /** Bob posts a return bundle into Alice's identity DO (one-sided pairing). */
+  async postPairingReturn(fromFp: string, bundle: string): Promise<Result<true>> {
+    this.ensureSchema();
+    if (!this.load()) return fail(404, "not_found", "unknown identity");
+    if (bundle.length > 256_000) return fail(413, "too_large", "pairing return too large");
+    const now = nowSeconds();
+    // Keep only the latest pending return (one ceremony at a time).
+    this.sql.exec("DELETE FROM pairing_return");
+    this.sql.exec("INSERT INTO pairing_return (bundle, from_fp, created_at, expires_at) VALUES (?, ?, ?, ?)", bundle, fromFp, now, now + 600);
+    await this.scheduleAlarm();
+    return ok(true);
+  }
+
+  async getPairingReturn(fp: string): Promise<Result<{ bundle: string }>> {
+    this.ensureSchema();
+    const state = this.load();
+    if (!state || toB64url(state.fingerprint) !== fp) return fail(404, "not_found", "unknown identity");
+    const now = nowSeconds();
+    this.sql.exec("DELETE FROM pairing_return WHERE expires_at <= ?", now);
+    const row = this.sql.exec<{ bundle: string }>("SELECT bundle FROM pairing_return LIMIT 1").toArray()[0];
+    if (!row) return fail(404, "not_found", "no pairing return");
+    this.sql.exec("DELETE FROM pairing_return");
+    return ok({ bundle: row.bundle });
+  }
+
   private async scheduleAlarm(): Promise<void> {
-    const next = this.sql.exec<{ m: number | null }>("SELECT MIN(expires_at) AS m FROM mailbox").one().m;
-    if (next === null) return;
+    const nextMailbox = this.sql.exec<{ m: number | null }>("SELECT MIN(expires_at) AS m FROM mailbox").one().m;
+    const nextPair = this.sql.exec<{ m: number | null }>("SELECT MIN(expires_at) AS m FROM pairing_return").toArray()[0]?.m ?? null;
+    const candidates = [nextMailbox, nextPair].filter((x): x is number => x !== null && x !== undefined);
+    if (candidates.length === 0) return;
+    const next = Math.min(...candidates);
     const at = next * 1000;
     const current = await this.ctx.storage.getAlarm();
     if (current === null || current > at) await this.ctx.storage.setAlarm(at);
@@ -560,6 +615,7 @@ export class IdentityDO extends DurableObject<Env> {
     this.sql.exec("DELETE FROM nonces WHERE expires_at < ?", now);
     this.sql.exec("DELETE FROM challenges WHERE expires_at < ?", now);
     this.sql.exec("DELETE FROM watchers WHERE expires_at < ?", now);
+    this.sql.exec("DELETE FROM pairing_return WHERE expires_at <= ?", now);
     await this.scheduleAlarm();
   }
 }
