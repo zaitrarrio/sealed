@@ -3,8 +3,8 @@ import { HARDWARE_PROTECTIONS, type KeyProtection } from "@sealed/core";
 import { useEffect, useRef, type ReactNode } from "react";
 import { percent } from "../lib/bytes";
 
-/** Six-digit check code, large and monospaced; read aloud in groups by screen readers. */
-export function CheckCode({ value, label = "Check code", small = false, testId }: { value: string; label?: string; small?: boolean; testId?: string }) {
+/** Six-digit safety code, large and monospaced; read aloud in groups by screen readers. */
+export function CheckCode({ value, label = "Safety code", small = false, testId }: { value: string; label?: string; small?: boolean; testId?: string }) {
   const spoken = value.replace(/\s+/g, "").split("").join(" ");
   return (
     <div className="stack" style={{ gap: 4 }}>

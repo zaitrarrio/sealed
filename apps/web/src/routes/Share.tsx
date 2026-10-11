@@ -20,13 +20,14 @@ import { FilePicker } from "../components/FilePicker";
 import { QrCode } from "../components/QrCode";
 import { CheckCode, Notice, PageTitle, Progress, ProtectionBadge, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
-import { useOnUnmount } from "../lib/hooks";
 import { codeOrigin } from "../lib/config";
 import { toEnvelopeInputs, totalSize } from "../lib/files";
 import { selectionSource, useSelection } from "../lib/selection";
 import { openSenderEvents } from "../lib/sender-events";
-import { useSession } from "../lib/session";
-import { describeWebAuthnError, userVerification } from "../lib/webauthn";
+import { session, useSession } from "../lib/session";
+import { probeRelay, resolveSendMode } from "../lib/mode-resolution";
+import { transferSessions } from "../lib/transfer-session-store";
+import { describeWebAuthnError, ensurePasskeyThenVerify } from "../lib/webauthn";
 
 type Approval = "each" | "batch" | "auto";
 
@@ -58,20 +59,18 @@ export function SharePage() {
   const [capNote, setCapNote] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const approving = useRef(false);
-  const shareRef = useRef<ShareSession | null>(null);
-  shareRef.current = share;
-  const anyApproved = useRef(false);
-  anyApproved.current = [...claims.values()].some((c) => c.status === "approved" || c.status === "downloaded");
 
-  // On leaving the page: if nobody was approved, stop the upload and cancel the transfer (its ciphertext is
-  // deleted). Once a device is approved the upload keeps running and the transfer lives until its TTL, so the
-  // receiver can finish downloading.
-  useOnUnmount(() => {
-    const sh = shareRef.current;
-    if (!sh || anyApproved.current) return;
-    abort.current?.abort();
-    void sh.cancel().catch(() => undefined);
-  });
+  // Transfers live in transferSessions (not tied to this component). Remounts restore the active share.
+  useEffect(() => {
+    const active = transferSessions.current;
+    if (!share && active) setShare(active.session);
+  }, [share]);
+
+  useEffect(() => {
+    if ([...claims.values()].some((c) => c.status === "approved" || c.status === "downloaded")) {
+      transferSessions.markApproved();
+    }
+  }, [claims]);
 
   useEffect(() => {
     if (!share) return;
@@ -119,8 +118,14 @@ export function SharePage() {
     if (!share) return false;
     patchClaim(c.claim_id, { busy: true, error: undefined as unknown as string });
     try {
-      await share.approve(c, (action) => userVerification(s.client, action));
+      await share.approve(c, (action) =>
+        ensurePasskeyThenVerify(s.client, action, {
+          alreadyRegistered: Boolean(s.profile.passkeyRegistered),
+          onRegistered: () => session.updateProfile({ passkeyRegistered: true }),
+        }),
+      );
       patchClaim(c.claim_id, { busy: false, status: "approved" });
+      transferSessions.markApproved();
       return true;
     } catch (e) {
       const msg = e instanceof RelayError ? e.message : describeWebAuthnError(e);
@@ -161,6 +166,16 @@ export function SharePage() {
     setExpired(false);
     const total = totalSize(files);
     setUpload({ done: 0, total, finished: false });
+
+    // Auto-resolve: if the relay is unreachable, offer the offline path instead of a dead share.
+    const online = await probeRelay(s.relayUrl, RELAY_TIMEOUT_MS);
+    const resolved = resolveSendMode({ online, allowRoom: asRoom, preferOffline: false, anyoneWatching: false });
+    if (resolved === "airgap" || resolved === "broadcast") {
+      setStarting(false);
+      setStartError({ message: "Sealed could not reach the relay.", offline: true });
+      return;
+    }
+
     const ctl = new AbortController();
     abort.current = ctl;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -180,10 +195,11 @@ export function SharePage() {
         onProgress: (p) => setUpload((u) => ({ ...u, done: p.bytesProcessed, total: p.totalBytes, finished: p.phase === "done" })),
         signal: ctl.signal,
       });
-      const session = await Promise.race([started, timeout]);
-      setShare(session);
+      const shareSession = await Promise.race([started, timeout]);
+      transferSessions.adopt(shareSession, ctl);
+      setShare(shareSession);
       setMode(asRoom ? "room" : "direct");
-      session.uploaded.then(
+      shareSession.uploaded.then(
         () => setUpload((u) => ({ ...u, done: u.total, finished: true })),
         (e: unknown) => {
           if (!ctl.signal.aborted) setUpload((u) => ({ ...u, error: errorMessage(e) }));
@@ -216,27 +232,25 @@ export function SharePage() {
   };
 
   const stop = async () => {
-    abort.current?.abort();
-    const sh = share;
     setShare(null);
     setClaims(new Map());
-    if (sh) await sh.cancel().catch(() => undefined);
+    await transferSessions.cancel();
   };
 
   if (!share) {
     return (
       <div className="stack-lg">
-        <PageTitle eyebrow="Share">Choose what to hand over</PageTitle>
-        {!s.active && <Notice tone="danger">This browser is not an active device of your identity, so it cannot share.</Notice>}
+        <PageTitle eyebrow="Send">Choose files</PageTitle>
+        {!s.active && <Notice tone="danger">This browser is not an active device of your identity, so it cannot send.</Notice>}
         <FilePicker files={files} onChange={setFiles} disabled={starting} />
         <fieldset className="stack">
           <legend>Who can receive</legend>
           <label className="toggle">
             <input type="checkbox" checked={room} onChange={(e) => setRoom(e.target.checked)} data-testid="room-toggle" />
             <span>
-              <strong>Let a room join</strong>
+              <strong>Allow multiple people</strong>
               <br />
-              <span className="subtle">Keep the code on screen so many people can scan it. Each device gets its own copy, encrypted to it.</span>
+              <span className="subtle">Keep the code on screen so many people can scan it. Each device gets its own encrypted copy.</span>
             </span>
           </label>
           {room && (
@@ -271,7 +285,8 @@ export function SharePage() {
         </fieldset>
         {!s.profile.passkeyRegistered && (
           <Notice>
-            You have not added a passkey, so you will not be able to approve receivers. <Link to="/settings">Add one in Settings</Link>.
+            The first time you approve a receiver, this browser will create a passkey so only you can unlock the share. You can also{" "}
+            <Link to="/settings">add one in Settings</Link> ahead of time.
           </Notice>
         )}
         {startError && (
@@ -296,7 +311,7 @@ export function SharePage() {
 
   return (
     <div className="stack-lg">
-      <PageTitle eyebrow={mode === "room" ? "Room" : "Direct"}>{mode === "room" ? "Anyone here can scan this" : "Have them scan this code"}</PageTitle>
+      <PageTitle eyebrow="Send">{mode === "room" ? "Anyone here can scan this" : "Have them scan this code"}</PageTitle>
       <div className="grid-2" style={{ alignItems: "start" }}>
         <div className="stack" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
           <QrCode text={share.code} label="Share code. Scan it with the receiving device's camera." testId="share-code" />
@@ -362,7 +377,7 @@ export function SharePage() {
                   });
                 }}
               >
-                Let a room join instead
+                Allow multiple people instead
               </button>
             )}
             <button type="button" className="btn ghost" onClick={() => void stop()} data-testid="stop-share">

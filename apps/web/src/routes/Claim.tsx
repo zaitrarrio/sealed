@@ -9,8 +9,10 @@ import { Link, useLocation, useParams } from "react-router";
 import { ReceivedFiles } from "../components/ReceivedFiles";
 import { CheckCode, Notice, PageTitle, Progress, Spinner, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
-import { useOnUnmount, useUnmountSignal } from "../lib/hooks";
+import { clearClaimSecret, takeClaimSecret } from "../lib/claim-stash";
+import { useUnmountSignal } from "../lib/hooks";
 import { ReceiveSink, type ReceivedFile } from "../lib/received";
+import { getShelf, putShelf } from "../lib/received-shelf";
 import { useSession } from "../lib/session";
 import { ReportForm } from "./Settings";
 
@@ -49,17 +51,37 @@ export function ClaimPage() {
   const location = useLocation();
   const [phase, setPhase] = useState<Phase>({ name: "claiming" });
   const sinkRef = useRef<ReceiveSink | null>(null);
+  const finished = useRef(false);
   const started = useRef(false);
   const signal = useUnmountSignal();
-  useOnUnmount(() => void sinkRef.current?.discard());
 
   useEffect(() => {
+    // Resume from the shelf if the user navigated away after a successful receive.
+    const shelved = getShelf(transferId);
+    if (shelved) {
+      finished.current = true;
+      setPhase({
+        name: "done",
+        handle: {
+          transferId,
+          transferIdBytes: fromB64url(transferId),
+          claimId: shelved.claimId,
+          claimToken: shelved.claimToken,
+          eventsUrl: "",
+          sas: shelved.sas,
+        },
+        manifest: shelved.manifest,
+        files: shelved.files,
+      });
+      return;
+    }
     if (started.current || !s.keys) return;
-    const secret = location.hash.replace(/^#/, "");
+    const secret = takeClaimSecret(transferId, location.hash);
     let transferBytes: Uint8Array;
     let claimSecret: Uint8Array;
     try {
       transferBytes = fromB64url(transferId);
+      if (!secret) throw new Error("missing");
       claimSecret = fromB64url(secret);
       if (transferBytes.length !== 16 || claimSecret.length !== 16) throw new Error("malformed");
     } catch {
@@ -67,7 +89,7 @@ export function ClaimPage() {
       return;
     }
     started.current = true;
-    // Remove the secret from the address bar and history once read.
+    // Remove the secret from the address bar and history once stashed.
     window.history.replaceState(window.history.state, "", `/c/${transferId}`);
     const keys = s.keys;
     const client = s.client;
@@ -89,6 +111,7 @@ export function ClaimPage() {
         return;
       }
       if (outcome !== "approved") {
+        clearClaimSecret(transferId);
         setPhase({ name: "ended", handle, ...endedFor(outcome) });
         return;
       }
@@ -110,6 +133,9 @@ export function ClaimPage() {
           },
           onProgress: (p) => setPhase({ name: "downloading", handle, manifest, done: p.bytesDone, total: p.totalBytes }),
         });
+        finished.current = true;
+        clearClaimSecret(transferId);
+        putShelf(transferId, sink, [...sink.files], m, { claimId: handle.claimId, claimToken: handle.claimToken, sas: handle.sas });
         setPhase({ name: "done", handle, manifest: m, files: [...sink.files] });
       } catch (e) {
         if (ctl.signal.aborted) return;
@@ -130,10 +156,10 @@ export function ClaimPage() {
       )}
       {phase.name === "waiting" && (
         <div className="stack-lg" data-testid="claim-waiting">
-          <PageTitle eyebrow="Receive">Check this code with the sender</PageTitle>
-          <CheckCode value={phase.handle.sas} label="Check code" testId="receiver-sas" />
+          <PageTitle eyebrow="Receive">Confirm the safety code with the sender</PageTitle>
+          <CheckCode value={phase.handle.sas} label="Safety code" testId="receiver-sas" />
           <p className="muted">
-            The sender's screen shows <strong>{s.profile.label}</strong> and a check code. If both codes match, they approve and the files arrive here. If they do not match, tell the sender to deny.
+            The sender's screen shows <strong>{s.profile.label}</strong> and the same safety code. If both match, they approve and the files arrive here. If they do not match, tell the sender to deny.
           </p>
           <Spinner label="Waiting for approval" />
         </div>
