@@ -1,0 +1,16 @@
+[package]
+name = "sealed-facet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Facet optical codec with wgpu/WGSL decode kernels (ADR-0011)"
+
+[dependencies]
+sealed-core = { workspace = true }
+bytemuck = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+default = ["cpu-only"]
+gpu = []
+cpu-only = []

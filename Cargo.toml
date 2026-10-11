@@ -1,0 +1,51 @@
+# Sealed Rust workspace (ADR-0011): one core compiled to WASM and native with wgpu decode kernels.
+[workspace]
+resolver = "3"
+members = [
+  "crates/sealed-core",
+  "crates/sealed-facet",
+  "crates/sealed-wasm",
+  "crates/sealed-uniffi",
+  "tools/fec-vectors",
+]
+default-members = ["crates/sealed-core", "crates/sealed-facet"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/zaitrarrio/sealed"
+
+[workspace.dependencies]
+sealed-core = { path = "crates/sealed-core" }
+sealed-facet = { path = "crates/sealed-facet" }
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+hmac = "0.12"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+elliptic-curve = { version = "0.13", features = ["ecdh"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+getrandom = { version = "0.2", features = ["js"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ciborium = "0.2"
+bytes = "1"
+zstd = "0.13"
+raptorq = "=2.0.1"
+hex = "0.4"
+base64 = "0.22"
+tiny-bip39 = "2"
+unicode-normalization = "0.1"
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = { version = "24", default-features = true }
+pollster = "0.4"
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
