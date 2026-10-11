@@ -248,7 +248,11 @@ export async function decryptToCache(rec: ReceivedFile, deviceKey: AgreementKey)
   return out;
 }
 
-/** Opens the system share sheet for a received file, then deletes the plaintext temporary copy. */
+/**
+ * Opens the system share sheet for a received file. The plaintext temporary copy is retained briefly after the
+ * share sheet returns: on iOS `shareAsync` resolves when the sheet is presented, not when the destination app
+ * finishes reading the file, so immediate deletion races the consumer.
+ */
 export async function shareReceived(rec: ReceivedFile, deviceKey: AgreementKey): Promise<void> {
   const tmp = await decryptToCache(rec, deviceKey);
   try {
@@ -256,7 +260,14 @@ export async function shareReceived(rec: ReceivedFile, deviceKey: AgreementKey):
     await Sharing.shareAsync(tmp.uri, { mimeType: rec.mediaType, dialogTitle: baseName(rec.path) });
   } finally {
     const parent = tmp.parentDirectory;
-    if (parent.exists) parent.delete();
+    // Delay cleanup so the receiving app can finish reading the file after the sheet dismisses.
+    setTimeout(() => {
+      try {
+        if (parent.exists) parent.delete();
+      } catch {
+        // already gone
+      }
+    }, 60_000);
   }
 }
 

@@ -20,11 +20,11 @@ import { QrCode } from "../src/components/QrCode";
 import { formatBytes } from "../src/lib/bytes";
 import { codeOrigin } from "../src/lib/config";
 import { toEnvelopeInputs, totalSize } from "../src/lib/files";
-import { useOnUnmount } from "../src/lib/hooks";
 import { confirmUser } from "../src/lib/native-keys";
 import { selectionSource, useSelection } from "../src/lib/selection";
 import { openSenderEvents } from "../src/lib/sender-events";
 import { useSession } from "../src/lib/session";
+import { transferSessions } from "../src/lib/transfer-session-store";
 import { Badge, B, Button, Card, CheckCode, Field, ListRow, Notice, P, Progress, ProtectionBadge, Row, Screen, Segmented, Stack, Title, Toggle, errorMessage } from "../src/ui/kit";
 
 type Approval = "each" | "batch" | "auto";
@@ -57,19 +57,17 @@ export default function Share() {
   const [copied, setCopied] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const approving = useRef(false);
-  const shareRef = useRef<ShareSession | null>(null);
-  shareRef.current = share;
-  const anyApproved = useRef(false);
-  anyApproved.current = [...claims.values()].some((c) => c.status === "approved" || c.status === "downloaded");
+  // Transfers live in transferSessions so navigating away does not cancel an in-flight share.
+  useEffect(() => {
+    const active = transferSessions.current;
+    if (!share && active) setShare(active.session);
+  }, [share]);
 
-  // Leaving before anyone was approved cancels the transfer (its ciphertext is deleted). Once a device is
-  // approved the upload keeps running and the transfer lives until its TTL so the receiver can finish.
-  useOnUnmount(() => {
-    const sh = shareRef.current;
-    if (!sh || anyApproved.current) return;
-    abort.current?.abort();
-    void sh.cancel().catch(() => undefined);
-  });
+  useEffect(() => {
+    if ([...claims.values()].some((c) => c.status === "approved" || c.status === "downloaded")) {
+      transferSessions.markApproved();
+    }
+  }, [claims]);
 
   useEffect(() => {
     if (!share) return;
@@ -126,6 +124,7 @@ export default function Share() {
     try {
       await share.approve(c, deviceUv(prompt));
       patchClaim(c.claim_id, { busy: false, status: "approved" });
+      transferSessions.markApproved();
       return true;
     } catch (e) {
       patchClaim(c.claim_id, { busy: false, error: errorMessage(e) });
@@ -193,10 +192,11 @@ export default function Share() {
         onProgress: (p) => setUpload((u) => ({ ...u, done: p.bytesProcessed, total: p.totalBytes, finished: p.phase === "done" })),
         signal: ctl.signal,
       });
-      const session = await Promise.race([started, timeout]);
-      setShare(session);
+      const shareSession = await Promise.race([started, timeout]);
+      transferSessions.adopt(shareSession, ctl);
+      setShare(shareSession);
       setMode(asRoom ? "room" : "direct");
-      session.uploaded.then(
+      shareSession.uploaded.then(
         () => setUpload((u) => ({ ...u, done: u.total, finished: true })),
         (e: unknown) => {
           if (!ctl.signal.aborted) setUpload((u) => ({ ...u, error: errorMessage(e) }));
@@ -227,23 +227,21 @@ export default function Share() {
   };
 
   const stop = async () => {
-    abort.current?.abort();
-    const sh = share;
     setShare(null);
     setClaims(new Map());
-    if (sh) await sh.cancel().catch(() => undefined);
+    await transferSessions.cancel();
   };
 
   if (!share) {
     return (
       <Screen>
-        <Title eyebrow="Share">Choose what to hand over</Title>
-        {!s.active ? <Notice tone="danger">This phone is not an active device of your identity, so it cannot share.</Notice> : null}
-        {s.keys && !s.keys.hardware ? <Notice tone="danger">This phone has no secure hardware key, so it cannot approve receivers. Share offline works without approval.</Notice> : null}
+        <Title eyebrow="Send">Choose files</Title>
+        {!s.active ? <Notice tone="danger">This phone is not an active device of your identity, so it cannot send.</Notice> : null}
+        {s.keys && !s.keys.hardware ? <Notice tone="danger">This phone has no secure hardware key, so it cannot approve receivers. Offline send works without approval.</Notice> : null}
         <FilePicker files={files} onChange={setFiles} disabled={starting} />
         <Stack>
           <Toggle
-            label="Let a room join"
+            label="Allow multiple people"
             detail="Keep the code on screen so many people can scan it. Each device gets its own copy, encrypted to it."
             value={room}
             onChange={setRoom}
@@ -278,7 +276,7 @@ export default function Share() {
             <P tone="danger">{startError.message}</P>
             {startError.offline ? (
               <Row>
-                <Button title="Share offline instead" tone="primary" onPress={() => router.push("/offline/send")} />
+                <Button title="Send offline instead" tone="primary" onPress={() => router.push("/offline/send")} />
                 <P tone="subtle">Your selection is kept.</P>
               </Row>
             ) : null}
@@ -352,7 +350,7 @@ export default function Share() {
       <Row>
         {mode === "direct" ? (
           <Button
-            title="Let a room join instead"
+            title="Allow multiple people instead"
             onPress={() => {
               void stop().then(() => {
                 setRoom(true);

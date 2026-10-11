@@ -1,4 +1,4 @@
-/** Home: share, share offline, receive, and the paired-mode screens. */
+/** Home: Send and Receive as the two primary actions; advanced paths stay secondary. */
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
@@ -24,12 +24,12 @@ export default function Home() {
   if (!s.profile.fingerprint) {
     return (
       <Screen>
-        <Title eyebrow="Sealed">Show a code. Hand over a file.</Title>
-        <P>Receiving needs no setup: scan the sender's code and approve nothing. To share, set up an identity on this phone.</P>
-        <Button title="Receive — scan a code" tone="primary" onPress={() => router.push("/receive")} testID="action-receive" />
+        <Title eyebrow="Sealed">Send a file. Receive with a scan.</Title>
+        <P>Receiving needs no setup: scan the sender's code. To send, set up an identity on this phone.</P>
+        <Button title="Receive" tone="primary" onPress={() => router.push("/receive")} testID="action-receive" />
         <Stack>
-          <Tile title="Set up to share" desc="Create an identity, add this phone to yours, or restore with a paper key." onPress={() => router.push("/welcome")} />
-          <Tile title="Receive offline" desc="Show a key code and read a stream from the sender's screen. No network needed." onPress={() => router.push("/offline/receive")} />
+          <Tile title="Set up to send" desc="Create an identity, add this phone to yours, or restore with a recovery phrase." onPress={() => router.push("/welcome")} />
+          <Tile title="Receive offline" desc="Show your key and read a stream from the sender's screen. No network needed." onPress={() => router.push("/offline/receive")} />
           <Tile title="Received files" right={received === null ? "…" : `${received}`} onPress={() => router.push("/files")} />
           <Tile title="Settings" right="relay, security" onPress={() => router.push("/settings")} />
         </Stack>
@@ -42,14 +42,20 @@ export default function Home() {
 
   return (
     <Screen>
-      <Title eyebrow={s.profile.label}>Show a code. Hand over a file.</Title>
-      {!s.active ? <Notice tone="danger">This phone is no longer an active device of your identity (it may have been revoked). Sharing is disabled. You can still receive.</Notice> : null}
+      <Title eyebrow={s.profile.label}>Send a file. Receive with a scan.</Title>
+      {!s.active ? <Notice tone="danger">This phone is no longer an active device of your identity (it may have been revoked). Sending is disabled. You can still receive.</Notice> : null}
       <Stack>
-        <Tile primary title="Share" desc={'Show a code; the person in front of you scans it. Turn on "Let a room join" for a whole room.'} onPress={() => router.push("/share")} testID="action-share" />
-        <Tile title="Share offline" desc="Stream files through the screen to a camera. No network needed on either side." onPress={() => router.push("/offline")} testID="action-offline" />
+        <Tile
+          primary
+          title="Send"
+          desc={'Drop files and show a code. Turn on "Allow multiple people" for a room.'}
+          onPress={() => router.push("/share")}
+          testID="action-share"
+        />
+        <Tile title="Receive" desc="Point your camera at a Sealed code." onPress={() => router.push("/receive")} testID="action-receive" />
       </Stack>
-      <Button title="Receive — scan a code" onPress={() => router.push("/receive")} testID="action-receive" />
       <Stack>
+        <Tile title="No network — stream through the screen" desc="When neither device can reach the internet." onPress={() => router.push("/offline")} testID="action-offline" />
         <Tile title="Inbox" right={`${waiting} waiting`} onPress={() => router.push("/inbox")} />
         <Tile title="Contacts" right={contacts === null ? "…" : `${contacts} paired`} onPress={() => router.push("/contacts")} />
         <Tile title="Received files" right={received === null ? "…" : `${received}`} onPress={() => router.push("/files")} />

@@ -175,8 +175,8 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "danger" |
   );
 }
 
-/** Six-digit check code, large and monospaced; read aloud digit by digit. */
-export function CheckCode({ value, label = "Check code", small = false, testID }: { value: string; label?: string; small?: boolean; testID?: string }) {
+/** Six-digit safety code, large and monospaced; read aloud digit by digit. */
+export function CheckCode({ value, label = "Safety code", small = false, testID }: { value: string; label?: string; small?: boolean; testID?: string }) {
   const spoken = value.replace(/\s+/g, "").split("").join(" ");
   return (
     <View style={{ gap: 4 }} accessible accessibilityLabel={`${label}: ${spoken}`}>
