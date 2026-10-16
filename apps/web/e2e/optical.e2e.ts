@@ -5,7 +5,7 @@
  * browser's non-extractable device key, and saving the exact bytes. Also a Broadcast receive, unsigned.
  */
 import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
-import { SoftwareAgreementKey, airgapSas, createReverseKeyOffer, parseCode, prepareAirgapStream, prepareBroadcastStream } from "@sealed/core";
+import { SoftwareAgreementKey, airgapSas, createReverseKeyOffer, parseCode, prepareAirgapStream, prepareBenchmarkStream, prepareBroadcastStream } from "@sealed/core";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,13 +73,28 @@ test("Broadcast receive: looping open stream decodes and is labeled unsigned", a
   const context = await browser.newContext({ baseURL: APP, acceptDownloads: true, permissions: ["camera"] });
   const page = await context.newPage();
   const payload = randomBytes(12_000);
-  const { sender } = await prepareBroadcastStream({ files: [{ path: "map.bin", mediaType: "application/octet-stream", size: payload.length, data: new Uint8Array(payload) }], tier: 1, interleaveCompatible: true });
+  const { sender } = await prepareBroadcastStream({ files: [{ path: "map.bin", mediaType: "application/octet-stream", size: payload.length, data: new Uint8Array(payload) }], tier: 0 });
   writeFacetY4m(video, sender, { width: W, height: H, codePx: CODE_PX, frames: 300, fps: 10 });
   await page.goto("/broadcast/receive");
   await expect(page.getByTestId("broadcast-done")).toBeVisible({ timeout: 120_000 });
   await expect(page.getByText("Unsigned broadcast")).toBeVisible();
   const got = await saveDownload(page, "save-0");
   expect(sha256(got)).toBe(sha256(payload));
+  await context.close();
+});
+
+test("Benchmark: filming a test stream reports progress and verifies the bytes", async () => {
+  const context = await browser.newContext({ baseURL: APP, permissions: ["camera"] });
+  const page = await context.newPage();
+  page.on("pageerror", (e) => console.error("pageerror:", e.message));
+  const { sender, size } = await prepareBenchmarkStream({ size: 16 * 1024, tier: 0, seed: 77 });
+  writeFacetY4m(video, sender, { width: W, height: H, codePx: CODE_PX, frames: 300, fps: 10 });
+  await page.goto("/bench");
+  await page.getByTestId("bench-film").click();
+  const report = page.getByTestId("bench-report");
+  await expect(report).toHaveAttribute("data-stage", "verified", { timeout: 120_000 });
+  await expect(report).toContainText(`payload         ${(size / 1024).toFixed(1)} KB`);
+  await expect(report).toContainText("verified        yes");
   await context.close();
 });
 
@@ -99,8 +114,8 @@ test("Air-gap send: the app scans a reverse key code, shows the check code and s
   await page.getByTestId("paste-code").fill(rk);
   await page.getByRole("button", { name: "Use this code" }).click();
   const payload = randomBytes(20_000);
+  // Filming the key code and choosing files is all it takes: encryption and streaming start by themselves.
   await page.getByTestId("file-input").setInputFiles({ name: "sent.bin", mimeType: "application/octet-stream", buffer: payload });
-  await page.getByTestId("prepare-airgap").click();
   const sas = (await page.getByTestId("airgap-sender-sas").textContent())!.trim();
   expect(sas).toMatch(/^\d{3} \d{3}$/);
 
@@ -141,7 +156,6 @@ test("Air-gap send: the app scans a reverse key code, shows the check code and s
     });
   }, { url: coreUrl, secret: rxSecret, nonce: rxNonce });
 
-  await page.getByTestId("start-stream").click();
   await expect(page.getByTestId("facet-canvas")).toBeVisible();
   const result = (await page.evaluate(() => (window as unknown as { __rx: { done: Promise<unknown> } }).__rx.done)) as { sas: string; path: string; sha: string };
   expect(result.sas).toBe(sas);

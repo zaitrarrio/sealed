@@ -145,12 +145,29 @@ async function pump(): Promise<void> {
   }
 }
 
+/** A code read by the browser's detector: no pixels to decode; same bookkeeping as a frame. */
+async function handleCode(text: string, timestamp: number): Promise<void> {
+  const progress = receiver.pushQrCode(text, timestamp);
+  await tryManifest();
+  const now = performance.now();
+  if (progress.complete || now - lastPost > 100) {
+    lastPost = now;
+    const d = receiver.descriptor;
+    post({ type: "progress", progress, sas: currentSas(), senderLabel: d?.senderLabel ?? null, files: manifestFiles, queue: queue.length, measurement: receiver.measure() });
+  }
+  if (progress.complete && !finished) {
+    for (const q of queue) closeFrame(q.frame);
+    queue = [];
+    await complete();
+  }
+}
+
 self.onmessage = (ev: MessageEvent<ToWorker>) => {
   const msg = ev.data;
   switch (msg.type) {
     case "init":
       init = msg;
-      receiver = new FacetReceiver();
+      receiver = new FacetReceiver(msg.tiers ? { tiers: msg.tiers } : {});
       finished = false;
       manifestFiles = null;
       manifestTried = null;
@@ -161,10 +178,14 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
     case "reset":
       for (const q of queue) closeFrame(q.frame);
       queue = [];
-      receiver = new FacetReceiver();
+      receiver = new FacetReceiver(init?.tiers ? { tiers: init.tiers } : {});
       finished = false;
       manifestFiles = null;
       manifestTried = null;
+      return;
+    case "code":
+      if (finished || !init) return;
+      void handleCode(msg.text, msg.timestamp);
       return;
     case "frame":
       if (finished || !init) {

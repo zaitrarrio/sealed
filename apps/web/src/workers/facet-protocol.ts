@@ -1,11 +1,16 @@
 /** Messages between the capture page and the Facet decode worker. */
-import type { ReceiveProgress } from "@sealed/core";
+import type { ReceiveProgress, Tier } from "@sealed/core";
 
 export type DecodeMode = "airgap" | "broadcast";
 
 export interface WorkerInit {
   type: "init";
   mode: DecodeMode;
+  /**
+   * Tiers to decode from camera frames (default all). [0] skips the colour-grid search, which costs hundreds of
+   * milliseconds per frame, when only QR frames are expected.
+   */
+  tiers?: Tier[];
   /** Air-gap: this device's keys (non-extractable CryptoKeys clone into the worker) and the reverse-key nonce. */
   airgap?: {
     agreementPrivate: CryptoKey;
@@ -23,7 +28,14 @@ export interface WorkerFrame {
   timestamp: number;
 }
 
-export type ToWorker = WorkerInit | WorkerFrame | { type: "reset" };
+/** A QR code read on the main thread by the browser's BarcodeDetector (its text). */
+export interface WorkerCode {
+  type: "code";
+  text: string;
+  timestamp: number;
+}
+
+export type ToWorker = WorkerInit | WorkerFrame | WorkerCode | { type: "reset" };
 
 export interface OpenedFileMessage {
   path: string;

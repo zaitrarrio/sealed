@@ -23,6 +23,7 @@ const ReceiveOfflinePage = lazy(() => offline().then((m) => ({ default: m.Receiv
 const SendOfflinePage = lazy(() => offline().then((m) => ({ default: m.SendOfflinePage })));
 const BroadcastSendPage = lazy(() => offline().then((m) => ({ default: m.BroadcastSendPage })));
 const BroadcastReceivePage = lazy(() => offline().then((m) => ({ default: m.BroadcastReceivePage })));
+const BenchPage = lazy(() => import("./routes/Bench").then((m) => ({ default: m.BenchPage })));
 
 function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<Spinner label="Loading…" />}>{children}</Suspense>;
@@ -146,6 +147,7 @@ export const router = createBrowserRouter([
       { path: "broadcast", element: <Lazy><BroadcastSendPage /></Lazy> },
       { path: "broadcast/receive", element: <Lazy><BroadcastReceivePage /></Lazy> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "bench", element: <Lazy><BenchPage /></Lazy> },
       { path: "security", element: <SecurityPage /> },
       { path: "*", element: <NotFound /> },
     ],

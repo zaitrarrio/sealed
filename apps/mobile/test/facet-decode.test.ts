@@ -65,3 +65,28 @@ describe("optical receive on mobile", () => {
     expect(new TextDecoder().decode(result.files[0]!.data)).toBe("hello world");
   });
 });
+
+describe("optical receive through the platform QR detector (detector path)", () => {
+  it("Air-gap at T0: the session completes from detector strings and shows the sender's safety code", { timeout: 120_000 }, async () => {
+    const device = { agreement: new SoftwareAgreementKey(), signing: new SoftwareSigningKey() };
+    const offer = createReverseKeyOffer("https://sealed.to", device, "Phone", 0);
+    const rk = parseCode(offer.code);
+    if (rk.kind !== "reverse-key") throw new Error("expected a reverse key code");
+    const { sender, sas } = await prepareAirgapStream({ files, reverseKey: rk, senderLabel: "Laptop" });
+    const session = new FacetDecodeSession({ mode: "airgap", airgap: { device, nonce: offer.nonce } });
+    let seen: string | null = null;
+    let result: DecodeResult | undefined;
+    for (let i = 0; i < 300 && !result; i++) {
+      const text = sender.qrText(sender.next());
+      if (!text || i % 5 === 3) continue; // the detector misses some frames
+      const r = await session.pushCode(text, i * 100);
+      seen = r.update.sas ?? seen;
+      result = r.result;
+      // Stray codes in view (a poster, another app) are ignored.
+      if (i === 10) await session.pushCode("https://example.com", i * 100);
+    }
+    expect(result).toBeDefined();
+    expect(seen).toBe(sas);
+    expect(result!.files[1]!.data).toEqual(files[1]!.data);
+  });
+});

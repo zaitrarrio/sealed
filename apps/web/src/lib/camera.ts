@@ -1,6 +1,8 @@
 /**
  * Camera access for scanning codes and capturing Facet streams (ADR-0010).
- *   - QR codes: a <video> preview sampled onto a canvas a few times per second and decoded with jsQR.
+ *   - QR codes: the browser's BarcodeDetector when it supports QR (Chrome on Android and macOS, Edge): fast,
+ *     finds a code anywhere in view at any angle. Otherwise a <video> preview sampled onto a canvas a few times
+ *     per second and decoded with jsQR.
  *   - Facet: raw frames from MediaStreamTrackProcessor (Chromium) or requestVideoFrameCallback + ImageBitmap,
  *     handed to a worker. Never through a video encoder.
  * Camera settings are locked with applyConstraints where the platform exposes them.
@@ -90,7 +92,106 @@ export async function continuousFocus(track: MediaStreamTrack): Promise<void> {
  * Samples a playing <video> and resolves each decoded QR text through `onCode`. Returns a stop function.
  * Decoding runs at most every `intervalMs` on a downscaled frame.
  */
+// ------------------------------------------------------------------------------------------- BarcodeDetector
+
+interface DetectedBarcode {
+  rawValue: string;
+}
+interface BarcodeDetectorLike {
+  detect(source: CanvasImageSource): Promise<DetectedBarcode[]>;
+}
+interface BarcodeDetectorCtor {
+  new (opts: { formats: string[] }): BarcodeDetectorLike;
+  getSupportedFormats(): Promise<string[]>;
+}
+
+let detectorPromise: Promise<BarcodeDetectorLike | null> | null = null;
+
+/** The browser's QR detector, or null where BarcodeDetector is missing or lacks QR support. */
+export function qrDetector(): Promise<BarcodeDetectorLike | null> {
+  if (!detectorPromise) {
+    detectorPromise = (async () => {
+      const Ctor = (globalThis as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+      if (!Ctor) return null;
+      try {
+        const formats = await Ctor.getSupportedFormats();
+        return formats.includes("qr_code") ? new Ctor({ formats: ["qr_code"] }) : null;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return detectorPromise;
+}
+
+/**
+ * Reads every QR code the camera sees with the browser's detector, once per video frame (skipping frames while
+ * a detection is still running). Calls `onCode` for each code that differs from the previous one. Returns a stop
+ * function. Use only when `qrDetector()` resolved to a detector.
+ */
+export function watchQrCodes(video: HTMLVideoElement, detector: BarcodeDetectorLike, onCode: (text: string, timestampMs: number) => void, dedupe = true): () => void {
+  let stopped = false;
+  let busy = false;
+  let last = "";
+  let handle = 0;
+  const run = (t: number) => {
+    if (stopped || busy || video.readyState < 2) return;
+    busy = true;
+    detector
+      .detect(video)
+      .then((codes) => {
+        for (const c of codes) {
+          if (!c.rawValue || (dedupe && c.rawValue === last)) continue;
+          last = c.rawValue;
+          onCode(c.rawValue, t);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        busy = false;
+      });
+  };
+  if (typeof video.requestVideoFrameCallback === "function") {
+    const cb = (now: number) => {
+      if (stopped) return;
+      handle = video.requestVideoFrameCallback(cb);
+      run(now);
+    };
+    handle = video.requestVideoFrameCallback(cb);
+    return () => {
+      stopped = true;
+      video.cancelVideoFrameCallback(handle);
+    };
+  }
+  const tick = (t: number) => {
+    if (stopped) return;
+    handle = requestAnimationFrame(tick);
+    run(t);
+  };
+  handle = requestAnimationFrame(tick);
+  return () => {
+    stopped = true;
+    cancelAnimationFrame(handle);
+  };
+}
+
+/** Scans for one QR code at a time (handshake codes): the browser's detector when present, else jsQR. */
 export function scanQr(video: HTMLVideoElement, onCode: (text: string) => void, intervalMs = 120): () => void {
+  let inner: (() => void) | null = null;
+  let stopped = false;
+  void qrDetector().then((d) => {
+    if (stopped) return;
+    // Handshake codes are re-reported while visible (the caller de-duplicates), so a code shown again after a
+    // cancelled prompt is read again.
+    inner = d ? watchQrCodes(video, d, (text) => onCode(text), false) : scanQrJs(video, onCode, intervalMs);
+  });
+  return () => {
+    stopped = true;
+    inner?.();
+  };
+}
+
+function scanQrJs(video: HTMLVideoElement, onCode: (text: string) => void, intervalMs: number): () => void {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   let stopped = false;

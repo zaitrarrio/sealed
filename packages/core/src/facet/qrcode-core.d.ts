@@ -17,13 +17,17 @@ declare module "qrcode/lib/core/qrcode.js" {
     data: Uint8Array;
     mode: "byte";
   }
+  export interface QrAlphanumericSegment {
+    data: string;
+    mode: "alphanumeric";
+  }
   export interface QrCreateOptions {
     errorCorrectionLevel?: "L" | "M" | "Q" | "H";
     version?: number;
     maskPattern?: number;
   }
   const QRCodeCore: {
-    create(data: readonly QrByteSegment[], options?: QrCreateOptions): QrSymbol;
+    create(data: readonly (QrByteSegment | QrAlphanumericSegment)[], options?: QrCreateOptions): QrSymbol;
   };
   export default QRCodeCore;
 }

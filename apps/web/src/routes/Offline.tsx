@@ -12,10 +12,9 @@ import { OpticalCapture, type CaptureResult, type CaptureUpdate } from "../compo
 import { QrCode } from "../components/QrCode";
 import { ReceivedFiles } from "../components/ReceivedFiles";
 import { Scanner } from "../components/Scanner";
-import { CheckCode, Notice, PageTitle, Progress, Spinner, errorMessage } from "../components/ui";
+import { CheckCode, Notice, PageTitle, Progress, Spinner, Steps, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
-import { cameraAvailable, openCamera, stopStream } from "../lib/camera";
-import { probeCamera, tierForProbe } from "../lib/capability";
+import { cameraAvailable } from "../lib/camera";
 import { acceptedOrigins, codeOrigin } from "../lib/config";
 import { kvGet } from "../lib/idb";
 import { cachedChain, listContacts } from "../lib/contacts-store";
@@ -27,11 +26,11 @@ import { useSession } from "../lib/session";
 import type { StoredDeviceKeys } from "../lib/webcrypto-keys";
 
 /** Above this, an optical transfer takes long enough that the UI warns before starting. */
-const LARGE_OPTICAL_BYTES = 20 * 1024 * 1024;
+const LARGE_OPTICAL_BYTES = 2 * 1024 * 1024;
 
 function etaSeconds(bytes: number, tier: Tier): number {
   const t = TIERS[tier];
-  return Math.ceil(bytes / (t.symbolSize * t.dataFps * 0.85));
+  return Math.ceil(bytes / (t.symbolSize * t.dataFps * 0.7));
 }
 
 function formatDuration(s: number): string {
@@ -66,6 +65,9 @@ export function OfflineHubPage() {
       <div className="row">
         <Link to="/offline/receive" className="btn">
           Receive offline
+        </Link>
+        <Link to="/bench" className="btn ghost" data-testid="open-bench">
+          Benchmark
         </Link>
         <Link to="/broadcast/receive" className="btn ghost">
           Receive a broadcast
@@ -116,41 +118,63 @@ export function SendOfflinePage() {
     })();
   }, [rk]);
 
-  const prepare = async () => {
-    if (!rk || files.length === 0) return;
+  // Turn 2 starts by itself: as soon as there is a key and files, encrypt and start streaming.
+  useEffect(() => {
+    if (!rk || files.length === 0 || prepared || busy || error) return;
     setBusy(true);
-    setError(null);
-    try {
-      const signedBy = s.keys && s.active ? s.keys : undefined;
-      const p = await prepareAirgapStream({ files: toEnvelopeInputs(files), reverseKey: rk, ...(signedBy ? { senderKeys: signedBy } : {}), senderLabel: s.profile.label || "Sealed sender" });
-      setPrepared({ sender: p.sender, sas: p.sas });
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+    const signedBy = s.keys && s.active ? s.keys : undefined;
+    prepareAirgapStream({ files: toEnvelopeInputs(files), reverseKey: rk, ...(signedBy ? { senderKeys: signedBy } : {}), senderLabel: s.profile.label || "Sealed sender" })
+      .then((p) => {
+        setPrepared({ sender: p.sender, sas: p.sas });
+        setConfirmed(true);
+      })
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => setBusy(false));
+  }, [rk, files, prepared, busy, error, s.keys, s.active, s.profile.label]);
+
+  const tier = (rk ? Math.min(rk.tier, 3) : 0) as Tier;
+  const bytes = totalSize(files);
 
   if (prepared && confirmed) {
-    return <FacetStream sender={prepared.sender} caption={`check ${prepared.sas}`} onStop={() => setConfirmed(false)} />;
+    return (
+      <div className="stack-lg">
+        <Steps current={2} steps={["They show, you film", "Switch: you show, they film"]} />
+        <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testId="airgap-sender-sas" />
+        <FacetStream sender={prepared.sender} caption={`T${tier}`} onStop={() => setConfirmed(false)} />
+      </div>
+    );
   }
-
-  const tier = (rk ? Math.min(rk.tier, 3) : 1) as Tier;
-  const bytes = totalSize(files);
 
   return (
     <div className="stack-lg">
-      <PageTitle eyebrow="Share offline · Secure">Send to one device, through light</PageTitle>
-      {error && <Notice tone="danger">{error}</Notice>}
+      <PageTitle eyebrow="Share offline · Secure">Send to one device, through the screen</PageTitle>
+      <Steps current={rk ? 2 : 1} steps={["They show, you film", "Switch: you show, they film"]} />
+      {error && (
+        <div className="stack">
+          <Notice tone="danger">{error}</Notice>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setError(null);
+              setPrepared(null);
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      {(files.length === 0 || !rk) && <FilePicker files={files} onChange={setFiles} disabled={busy} />}
       {!rk && (
         <div className="stack">
-          <p className="muted">On the receiving device, open Sealed and choose "Receive offline". Scan the key code it shows.</p>
+          <p className="muted">On their device: Sealed → Receive offline. Point your camera at the code it shows; anywhere in view is fine.</p>
           {!cameraAvailable() && <Notice tone="danger">This device has no usable camera, so Secure offline sharing is unavailable. Use "Anyone watching" only for material meant for everyone in view.</Notice>}
           <Scanner
-            label="Scan the receiver's key code"
+            label="Film their key code"
             onCode={(text) => {
               try {
                 setRk(expectCode(text, "reverse-key", acceptedOrigins()));
+                setError(null);
                 return null;
               } catch (e) {
                 return friendlyCodeError(e);
@@ -159,39 +183,35 @@ export function SendOfflinePage() {
           />
         </div>
       )}
-      {rk && !prepared && (
-        <div className="stack-lg">
-          <div className="card stack">
-            <strong>Receiver: {pinnedName ?? rk.label}</strong>
-            <span className="subtle">
-              Capability T{rk.tier}
-              {pinnedName ? " · a device of a paired contact" : ""}
-            </span>
-          </div>
-          <FilePicker files={files} onChange={setFiles} disabled={busy} />
+      {rk && (
+        <div className="card stack">
+          <strong>Got their key: {pinnedName ?? rk.label}</strong>
+          {files.length === 0 && <p className="muted" style={{ margin: 0 }}>Choose the files to send; streaming starts as soon as you do.</p>}
           {bytes > 0 && (
-            <p className={bytes > LARGE_OPTICAL_BYTES ? "notice" : "subtle"}>
+            <p className="subtle" style={{ margin: 0 }}>
               About {formatDuration(etaSeconds(bytes, tier))} of streaming at T{tier}
-              {bytes > LARGE_OPTICAL_BYTES ? ". That is long for an optical transfer; consider sharing online if a network is allowed." : "."}
+              {bytes > LARGE_OPTICAL_BYTES ? ". That is long for an offline transfer; share online if a network is allowed." : "."}
             </p>
           )}
-          <button type="button" className="btn primary block" disabled={busy || files.length === 0} onClick={() => void prepare()} data-testid="prepare-airgap">
-            {busy ? "Encrypting…" : "Encrypt for this receiver"}
-          </button>
-        </div>
-      )}
-      {prepared && !confirmed && (
-        <div className="stack-lg">
-          <CheckCode value={prepared.sas} label="Check code" testId="airgap-sender-sas" />
-          <p className="muted">Start the stream. The receiver's screen shows a check code as soon as it reads the first frames. Continue only if it matches; if not, stop: the key code was not theirs.</p>
-          <div className="row">
-            <button type="button" className="btn primary" onClick={() => setConfirmed(true)} data-testid="start-stream">
-              Start streaming
-            </button>
-            <button type="button" className="btn ghost" onClick={() => setPrepared(null)}>
-              Back
-            </button>
-          </div>
+          {busy && <Spinner label="Encrypting for their device…" />}
+          {prepared && !confirmed && (
+            <div className="row">
+              <CheckCode value={prepared.sas} label="Safety code" />
+              <button type="button" className="btn primary" onClick={() => setConfirmed(true)} data-testid="start-stream">
+                Stream again
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setPrepared(null);
+                  setRk(null);
+                }}
+              >
+                Different receiver
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -208,33 +228,16 @@ export function ReceiveOfflinePage() {
   const [result, setResult] = useState<{ files: ReceivedFile[]; sender: CaptureResult["sender"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stored, setStored] = useState<StoredDeviceKeys | null>(null);
-  const [probing, setProbing] = useState(false);
 
   useEffect(() => {
     void kvGet<StoredDeviceKeys>("device-keys").then((k) => setStored(k ?? null));
   }, [s.keys]);
 
-  const makeOffer = async (measure: boolean) => {
+  // T0: QR frames, which this browser reads with its QR detector (or its own decoder) and every sender can make.
+  // The colour-grid tiers need a faster pixel decoder than the browser has (ADR-0018).
+  const makeOffer = () => {
     if (!s.keys) return;
-    let tier: Tier = 1;
-    if (measure && cameraAvailable()) {
-      setProbing(true);
-      let stream: MediaStream | null = null;
-      try {
-        stream = await openCamera({ width: 1920, height: 1080, frameRate: 60 });
-        const video = document.createElement("video");
-        video.muted = true;
-        video.playsInline = true;
-        video.srcObject = stream;
-        await video.play();
-        tier = tierForProbe(await probeCamera(video, stream));
-      } catch (e) {
-        setError(errorMessage(e));
-      } finally {
-        stopStream(stream);
-        setProbing(false);
-      }
-    }
+    const tier: Tier = 0;
     const o = createReverseKeyOffer(codeOrigin(), s.keys, s.profile.label || "Sealed receiver", tier);
     setOffer({ ...o, tier });
   };
@@ -244,7 +247,7 @@ export function ReceiveOfflinePage() {
   useEffect(() => {
     if (!s.keys || offered.current) return;
     offered.current = true;
-    void makeOffer(false);
+    makeOffer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.keys]);
 
@@ -263,29 +266,22 @@ export function ReceiveOfflinePage() {
 
   return (
     <div className="stack-lg">
-      <PageTitle eyebrow="Receive offline">Show this to the sender</PageTitle>
+      <PageTitle eyebrow="Receive offline">{capturing ? "Film their screen" : "Show this to the sender"}</PageTitle>
+      <Steps current={capturing ? 2 : 1} steps={["You show, they film", "Switch: they show, you film"]} />
       {error && <Notice tone="danger">{error}</Notice>}
       {!capturing && (
         <div className="stack-lg" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
           {offer ? <QrCode text={offer.code} label="Offline key code" testId="reverse-key-code" /> : <Spinner label="Preparing…" />}
-          <p className="muted">The sender scans this with their camera. It carries only this device's public key; nothing secret.</p>
-          {offer && (
-            <p className="subtle">
-              Reporting capability T{offer.tier}.{" "}
-              <button type="button" className="btn small ghost" disabled={probing} onClick={() => void makeOffer(true)}>
-                {probing ? "Measuring camera…" : "Measure camera"}
-              </button>
-            </p>
-          )}
+          <p className="muted">They film this with Sealed → Share offline. It carries only this device's public key; nothing secret.</p>
           <button type="button" className="btn primary block" disabled={!offer || !stored} onClick={() => setCapturing(true)} data-testid="start-capture">
-            They scanned it — point my camera at their screen
+            They have it — switch to my camera
           </button>
         </div>
       )}
       {capturing && offer && stored && (
         <div className="stack">
           <OpticalCapture
-            init={{ type: "init", mode: "airgap", airgap: { agreementPrivate: stored.agreementPrivate, agreementPublic: stored.agreementPublic, signingPrivate: stored.signingPrivate, signingPublic: stored.signingPublic, nonce: offer.nonce } }}
+            init={{ type: "init", mode: "airgap", ...(offer.tier === 0 ? { tiers: [0] } : {}), airgap: { agreementPrivate: stored.agreementPrivate, agreementPublic: stored.agreementPublic, signingPrivate: stored.signingPrivate, signingPublic: stored.signingPublic, nonce: offer.nonce } }}
             onProgress={setUpdate}
             onComplete={(r) =>
               setResult({
@@ -377,7 +373,7 @@ export function BroadcastSendPage() {
           setBusy(true);
           setError(null);
           const publisher = sign && s.keys && s.chain ? { signing: s.keys.signing, fingerprint: s.chain.fingerprint, label: s.profile.label } : undefined;
-          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 1, interleaveCompatible: true })
+          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 0 })
             .then((r) => setSender(r.sender))
             .catch((e: unknown) => setError(errorMessage(e)))
             .finally(() => setBusy(false));
@@ -451,7 +447,7 @@ export function BroadcastReceivePage() {
         <>
           <OpticalCapture
             key={key.current}
-            init={{ type: "init", mode: "broadcast" }}
+            init={{ type: "init", mode: "broadcast", tiers: [0] }}
             onProgress={setUpdate}
             onComplete={(r) => {
               void classify(r).then((publisher) =>

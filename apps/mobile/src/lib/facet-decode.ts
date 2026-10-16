@@ -66,9 +66,20 @@ export class FacetDecodeSession {
     this.done = false;
   }
 
-  /** Feeds one frame. Returns the progress, and the result once the stream is complete. */
+  /** Feeds one camera frame (pixel path). Returns the progress, and the result once the stream is complete. */
   async push(image: RgbaImage, timestampMs: number): Promise<{ update: DecodeProgress; result?: DecodeResult }> {
-    const progress = this.receiver.push(image, timestampMs);
+    return this.after(this.receiver.push(image, timestampMs));
+  }
+
+  /**
+   * Feeds one QR code read by the platform detector (detector path) — the usual way on phones: no pixels are
+   * decoded in JavaScript.
+   */
+  async pushCode(text: string, timestampMs: number): Promise<{ update: DecodeProgress; result?: DecodeResult }> {
+    return this.after(this.receiver.pushQrCode(text, timestampMs));
+  }
+
+  private async after(progress: ReceiveProgress): Promise<{ update: DecodeProgress; result?: DecodeResult }> {
     await this.tryManifest();
     const update: DecodeProgress = {
       progress,

@@ -27,8 +27,10 @@ import type { FacetReceiver } from "./receiver";
 import { isTier, planStreamOti } from "./tiers";
 
 const AIRGAP_TTL_SECONDS = 24 * 3600;
-const DEFAULT_AIRGAP_TIER: Tier = 1;
-const DEFAULT_BROADCAST_TIER: Tier = 1;
+// T0 (QR) by default: every phone and most browsers can read it with the platform's own detector, which keeps
+// up with the stream; the colour-grid tiers need the JavaScript pixel decoder (ADR-0018).
+const DEFAULT_AIRGAP_TIER: Tier = 0;
+const DEFAULT_BROADCAST_TIER: Tier = 0;
 
 /** Error raised when an optical Envelope cannot be opened (missing key material, wrong device, bad signature). */
 export class OpticalError extends Error {

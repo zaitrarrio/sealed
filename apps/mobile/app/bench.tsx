@@ -1,0 +1,183 @@
+/**
+ * Optical benchmark. One phone shows a looping test stream; the other films it and reports, live, how far the
+ * pipeline got: codes read, valid Sealed frames, completion, throughput, and a byte-for-byte check. Nothing to
+ * pair or type: the stream names its own seed and size, so the filming phone knows what to expect.
+ *
+ * T0 (QR) is read by the platform detector, as real offline transfers are. The colour-grid tiers use the
+ * JavaScript pixel decoder, which is why they are marked experimental.
+ */
+import { BENCHMARK_SIZES, BenchmarkMeter, formatBenchmarkReport, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type RgbaImage, type Tier } from "@sealed/core";
+import * as Clipboard from "expo-clipboard";
+import * as Device from "expo-device";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform, Share, Text, View } from "react-native";
+import { CodeCamera } from "../src/components/CodeCamera";
+import { FacetStream } from "../src/components/FacetStream";
+import { PixelCamera } from "../src/components/PixelCamera";
+import { formatBytes } from "../src/lib/bytes";
+import { session, useSession } from "../src/lib/session";
+import { Button, Card, Notice, P, Progress, Row, Screen, Segmented, Stack, Title, errorMessage, fonts } from "../src/ui/kit";
+
+type Role = "show" | "film";
+type TierChoice = "0" | "1" | "2" | "3";
+
+function deviceLine(): string {
+  return `${Device.manufacturer ?? ""} ${Device.modelName ?? "phone"} · ${Platform.OS} ${Device.osVersion ?? ""}`.replace(/\s+/g, " ").trim();
+}
+
+export default function Bench() {
+  const [role, setRole] = useState<Role>("film");
+  return (
+    <Screen>
+      <Title eyebrow="Benchmark">Measure an offline transfer</Title>
+      <P>One phone shows a test stream, the other films it. Then switch roles to measure the other direction.</P>
+      <Segmented
+        label="Role"
+        value={role}
+        onChange={setRole}
+        options={[
+          ["film", "Film"],
+          ["show", "Show"],
+        ]}
+      />
+      {role === "show" ? <ShowStream /> : <FilmStream />}
+    </Screen>
+  );
+}
+
+function ShowStream() {
+  const s = useSession();
+  const [size, setSize] = useState<string>(String(BENCHMARK_SIZES[1]));
+  const [tier, setTier] = useState<TierChoice>("0");
+  const [stream, setStream] = useState<BenchmarkStream | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (stream) {
+    return (
+      <View style={{ gap: 12 }}>
+        <FacetStream sender={stream.sender} caption={`bench T${stream.tier} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} reduceMotion={s.settings.reduceMotion ?? false} />
+        <P tone="subtle">The stream repeats until you stop it. The filming phone can start at any time.</P>
+      </View>
+    );
+  }
+  return (
+    <Stack>
+      <Segmented label="Payload size" value={size} onChange={setSize} options={BENCHMARK_SIZES.map((b) => [String(b), formatBytes(b)] as const)} />
+      <Segmented
+        label="Tier"
+        value={tier}
+        onChange={setTier}
+        options={[
+          ["0", "T0 QR"],
+          ["1", "T1 grid"],
+          ["2", "T2"],
+          ["3", "T3"],
+        ]}
+      />
+      {tier !== "0" ? <Notice>Grid tiers are experimental: the filming phone decodes them in JavaScript, about two frames a second at best.</Notice> : null}
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <Button
+        title={busy ? "Preparing…" : "Show test stream"}
+        tone="primary"
+        busy={busy}
+        testID="bench-show"
+        onPress={() => {
+          setBusy(true);
+          setError(null);
+          prepareBenchmarkStream({ size: Number(size), tier: Number(tier) as Tier })
+            .then(setStream)
+            .catch((e: unknown) => setError(errorMessage(e)))
+            .finally(() => setBusy(false));
+        }}
+      />
+    </Stack>
+  );
+}
+
+function FilmStream() {
+  const [path, setPath] = useState<"codes" | "pixels">("codes");
+  const [run, setRun] = useState(0);
+  const [running, setRunning] = useState(false);
+  const meter = useRef(new BenchmarkMeter());
+  const [report, setReport] = useState<BenchmarkReport | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Live numbers four times a second while running.
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => {
+      const r = meter.current.report();
+      setReport(r);
+      if (r.stage === "verified" || r.stage === "failed") setRunning(false);
+    }, 250);
+    return () => clearInterval(t);
+  }, [running, run]);
+
+  // Pixel-path runs teach the capability check how fast this phone decodes grid frames.
+  useEffect(() => {
+    if (running || path !== "pixels" || !report?.decodeMsPerFrame) return;
+    void session.updateSettings({ opticalMeasurement: { captureFps: report.inputsPerSecond, decodeMsPerFrame: report.decodeMsPerFrame, at: Date.now() } });
+  }, [running, path, report]);
+
+  const start = () => {
+    meter.current = new BenchmarkMeter();
+    setReport(meter.current.report());
+    setCopied(false);
+    setRun((n) => n + 1);
+    setRunning(true);
+  };
+
+  const onCode = useCallback((text: string) => meter.current.pushCode(text), []);
+  const onImage = useCallback(async (image: RgbaImage) => meter.current.pushImage(image), []);
+
+  const full = report ? { ...report, device: deviceLine() } : null;
+  const overlay = report ? <LiveNumbers r={report} /> : null;
+
+  return (
+    <Stack>
+      <Segmented
+        label="Decoder"
+        value={path}
+        onChange={(v) => {
+          setPath(v);
+          setRunning(false);
+        }}
+        options={[
+          ["codes", "QR (system detector)"],
+          ["pixels", "Grid (JavaScript)"],
+        ]}
+      />
+      {!running ? <Button title={report ? "Film again" : "Start filming"} tone="primary" onPress={start} testID="bench-film" /> : null}
+      {running ? (
+        path === "codes" ? (
+          <CodeCamera key={run} onCode={onCode} overlay={overlay} label="Camera view of the test stream" />
+        ) : (
+          <PixelCamera key={run} onImage={onImage} overlay={overlay} label="Camera view of the test stream" />
+        )
+      ) : null}
+      {running ? <Button title="Stop" tone="ghost" onPress={() => setRunning(false)} /> : null}
+      {full ? (
+        <Card>
+          <P tone={full.stage === "failed" ? "danger" : full.stage === "verified" ? "ok" : "default"}>{full.verdict}</P>
+          <Progress fraction={full.fraction} label={`${full.symbolsReceived}/${full.symbolsNeeded || "?"} symbols`} />
+          <Text selectable style={{ fontFamily: fonts.mono, fontSize: 12, color: "#CFC4B8", lineHeight: 18 }}>
+            {formatBenchmarkReport(full)}
+          </Text>
+          <Row>
+            <Button small title={copied ? "Copied" : "Copy report"} onPress={() => void Clipboard.setStringAsync(`${formatBenchmarkReport(full)}\n\n${JSON.stringify(full)}`).then(() => setCopied(true))} />
+            <Button small tone="ghost" title="Share" onPress={() => void Share.share({ message: formatBenchmarkReport(full) })} />
+          </Row>
+        </Card>
+      ) : null}
+    </Stack>
+  );
+}
+
+function LiveNumbers({ r }: { r: BenchmarkReport }) {
+  return (
+    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: "#F4EDE4" }}>
+      {`${r.inputs} read · ${r.validFrames} valid · ${Math.round(r.fraction * 100)}% · ${(r.goodputBytesPerSecond / 1024).toFixed(1)} KB/s · ${(r.elapsedMs / 1000).toFixed(0)} s`}
+    </Text>
+  );
+}

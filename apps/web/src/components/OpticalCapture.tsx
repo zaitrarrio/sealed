@@ -1,9 +1,11 @@
 /**
- * Camera capture for Facet streams (spec §7.6, ADR-0010): raw frames go to the decode worker; the live progress
- * (coverage) comes back. Camera settings are locked after the stream is detected.
+ * Camera capture for Facet streams (spec §7.6, ADR-0010). When only QR (T0) frames are expected and the browser
+ * has a QR BarcodeDetector, the detector reads each frame's text on the main thread and the decode worker gets
+ * only that text — fast, and the code can be anywhere in view. Otherwise raw frames go to the decode worker.
+ * Live progress (coverage) comes back from the worker. Camera settings are locked after the stream is detected.
  */
 import { useEffect, useRef, useState } from "react";
-import { CameraError, feedFrames, lockCameraSettings, openCamera, stopStream } from "../lib/camera";
+import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, stopStream, watchQrCodes } from "../lib/camera";
 import type { FromWorker, ToWorker, WorkerInit } from "../workers/facet-protocol";
 import { Notice } from "./ui";
 
@@ -14,6 +16,7 @@ export function OpticalCapture({ init, onProgress, onComplete, onError }: { init
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locked, setLocked] = useState<string[] | null>(null);
+  const [reader, setReader] = useState<"detector" | "frames" | null>(null);
   const cbs = useRef({ onProgress, onComplete, onError });
   cbs.current = { onProgress, onComplete, onError };
 
@@ -52,10 +55,22 @@ export function OpticalCapture({ init, onProgress, onComplete, onError }: { init
         if (!video) return;
         video.srcObject = stream;
         await video.play().catch(() => undefined);
-        stopFeed = feedFrames(stream, video, (frame, timestamp) => {
-          const msg: ToWorker = { type: "frame", frame, timestamp };
-          worker.postMessage(msg, [frame as unknown as Transferable]);
-        });
+        const qrOnly = init.tiers !== undefined && init.tiers.every((t) => t === 0);
+        const detector = qrOnly ? await qrDetector() : null;
+        if (cancelled) return;
+        if (detector) {
+          setReader("detector");
+          stopFeed = watchQrCodes(video, detector, (text, timestamp) => {
+            const msg: ToWorker = { type: "code", text, timestamp };
+            worker.postMessage(msg);
+          });
+        } else {
+          setReader("frames");
+          stopFeed = feedFrames(stream, video, (frame, timestamp) => {
+            const msg: ToWorker = { type: "frame", frame, timestamp };
+            worker.postMessage(msg, [frame as unknown as Transferable]);
+          });
+        }
       } catch (e) {
         setCameraError(e instanceof CameraError ? e.message : "The camera could not start.");
       }
@@ -77,9 +92,9 @@ export function OpticalCapture({ init, onProgress, onComplete, onError }: { init
       ) : (
         <div className="scanner">
           <video ref={videoRef} playsInline muted aria-label="Camera view of the sender's screen" />
-          <div className="reticle" aria-hidden="true" />
         </div>
       )}
+      {reader && <p className="subtle">{reader === "detector" ? "Reading with the browser's QR detector — the code can be anywhere in view." : "Reading camera frames in Sealed's decoder (this browser has no QR detector); hold the other screen close and steady."}</p>}
       {locked && <p className="subtle">{locked.length ? `Camera ${locked.join(", ")} locked for the stream.` : "This camera does not allow locking focus or exposure; hold steady."}</p>}
     </div>
   );

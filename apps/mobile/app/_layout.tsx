@@ -92,6 +92,7 @@ export default function RootLayout() {
           <Stack.Screen name="broadcast/index" options={{ title: "Broadcast" }} />
           <Stack.Screen name="broadcast/receive" options={{ title: "Receive a broadcast" }} />
           <Stack.Screen name="settings" options={{ title: "Settings" }} />
+          <Stack.Screen name="bench" options={{ title: "Benchmark" }} />
           <Stack.Screen name="security" options={{ title: "Security" }} />
           <Stack.Screen name="unknown-code" options={{ title: "Sealed" }} />
         </Stack>

@@ -107,7 +107,6 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
       {active ? (
         <div className="scanner">
           <video ref={videoRef} playsInline muted aria-label={label} />
-          <div className="reticle" aria-hidden="true" />
         </div>
       ) : (
         <div className="card sunken stack">

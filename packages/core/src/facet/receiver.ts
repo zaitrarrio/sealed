@@ -22,7 +22,7 @@ import { anchorCalibration, defaultCalibration, fitChannel, DEFAULT_SIGMA, type 
 import { decodeData, decodeHeaders, observe, type FusionStats, type HeaderCandidate } from "./decode";
 import { decodeDescriptorPayload } from "./descriptor";
 import { HEADER_BYTES, headerCrcMatches, parseFrameHeader, type FrameHeader } from "./header";
-import { readQr } from "./qr";
+import { qrFrameBytes, readQr } from "./qr";
 import { paletteExcess } from "./palette";
 import type { Homography } from "./homography";
 
@@ -166,11 +166,37 @@ export class FacetReceiver {
     return this.updateProgress();
   }
 
+  /**
+   * Feeds one QR code read by an external detector (a phone's system QR scanner, the web BarcodeDetector): its
+   * text, or its bytes when the detector exposes them. Use this instead of `push` when the platform finds codes
+   * itself — it is far faster than decoding camera frames here and needs no alignment. Non-Sealed codes and
+   * codes from other streams are ignored. Never throws.
+   */
+  pushQrCode(content: string | Uint8Array, timestampMs?: number): ReceiveProgress {
+    this.framesSeen++;
+    if (timestampMs !== undefined && Number.isFinite(timestampMs)) {
+      this.timestamps.push(timestampMs);
+      if (this.timestamps.length > 120) this.timestamps.shift();
+    }
+    if (this.resultBytes || !this.allowed.has(0)) return this.updateProgress();
+    try {
+      const bytes = qrFrameBytes(content);
+      if (bytes) this.acceptT0(bytes);
+    } catch {
+      // Malformed or adversarial codes must never break the capture loop.
+    }
+    return this.updateProgress();
+  }
+
   // ---------------------------------------------------------------- T0
 
   private tryQr(image: RgbaImage): boolean {
     const bytes = readQr(image);
-    if (!bytes || bytes.length < HEADER_BYTES + 2) return false;
+    return bytes ? this.acceptT0(bytes) : false;
+  }
+
+  private acceptT0(bytes: Uint8Array): boolean {
+    if (bytes.length < HEADER_BYTES + 2) return false;
     const header = bytes.subarray(0, HEADER_BYTES);
     const payload = bytes.subarray(HEADER_BYTES);
     const h = parseFrameHeader(header);

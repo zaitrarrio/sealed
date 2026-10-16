@@ -15,4 +15,18 @@ export {
   type BroadcastPublisher,
   type OpenedOptical,
 } from "./optical";
+export { qrFrameBytes, qrFrameText, QR_FRAME_BYTES, QR_VERSION } from "./qr";
+export { base45Decode, base45Encode } from "./base45";
+export {
+  BENCHMARK_SIZES,
+  BenchmarkMeter,
+  benchmarkFileName,
+  benchmarkPayload,
+  formatBenchmarkReport,
+  parseBenchmarkFileName,
+  prepareBenchmarkStream,
+  type BenchmarkReport,
+  type BenchmarkStage,
+  type BenchmarkStream,
+} from "./bench";
 export { BACKGROUND as FACET_BACKGROUND, PALETTE_8 as FACET_PALETTE } from "./palette";

@@ -1,27 +1,32 @@
 /**
  * Capability tier for the reverse key code (spec §7.7, ADR-0010 step 4). The tier a receiver reports caps the
- * stream the sender produces, so it must reflect what this phone can actually decode — not just what its camera
- * delivers. Facet decoding runs in JavaScript here (see ADR-0016), so the measured decode time per frame
- * dominates: a sender's frame is held for ~100 ms, and a receiver that reads fewer than roughly one frame in
- * eight cannot keep up with denser tiers.
+ * stream the sender produces, so it must reflect what this phone can actually decode.
  *
- * Without a measurement the phone reports T1. After every optical receive the measured capture rate and decode
- * time are kept and the next offer uses them.
+ * Phones read T0 (QR) frames with the platform's own detector, which keeps up with the sender and needs no
+ * alignment, so T0 is the default and what every offline transfer uses. The colour-grid tiers (T1–T3) need the
+ * JavaScript image decoder (~0.5 s per frame on a phone) until a native decoder ships; a phone offers a grid
+ * tier only when a measured pixel decode keeps up with that tier's frame interval, which the benchmark records.
  */
-import type { Tier } from "@sealed/core";
+import { TIERS, type Tier } from "@sealed/core";
 
 export interface OpticalMeasurement {
   captureFps: number;
+  /** Pixel-path decode time per camera frame (the detector path is not measured here). */
   decodeMsPerFrame: number;
 }
 
-export const DEFAULT_TIER: Tier = 1;
+export const DEFAULT_TIER: Tier = 0;
 
 export function tierForMeasurement(m: OpticalMeasurement | undefined): Tier {
   if (!m || !Number.isFinite(m.decodeMsPerFrame) || m.decodeMsPerFrame <= 0) return DEFAULT_TIER;
-  if (m.captureFps < 20) return 0;
-  if (m.decodeMsPerFrame <= 150 && m.captureFps >= 50) return 3;
-  if (m.decodeMsPerFrame <= 300 && m.captureFps >= 28) return 2;
-  if (m.decodeMsPerFrame <= 1200) return 1;
+  for (const t of [3, 2, 1] as const) {
+    const intervalMs = 1000 / TIERS[t].dataFps;
+    if (m.decodeMsPerFrame <= intervalMs && m.captureFps >= TIERS[t].dataFps * 2) return t;
+  }
   return 0;
+}
+
+/** How a tier is received on this phone. */
+export function decodePathFor(tier: Tier): "codes" | "pixels" {
+  return tier === 0 ? "codes" : "pixels";
 }

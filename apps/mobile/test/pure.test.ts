@@ -45,13 +45,13 @@ describe("frame conversion", () => {
 });
 
 describe("capability tier", () => {
-  it("defaults to T1 and follows measured decode speed", () => {
-    expect(tierForMeasurement(undefined)).toBe(1);
-    expect(tierForMeasurement({ captureFps: 60, decodeMsPerFrame: 100 })).toBe(3);
-    expect(tierForMeasurement({ captureFps: 30, decodeMsPerFrame: 250 })).toBe(2);
-    expect(tierForMeasurement({ captureFps: 30, decodeMsPerFrame: 800 })).toBe(1);
-    expect(tierForMeasurement({ captureFps: 30, decodeMsPerFrame: 3000 })).toBe(0);
-    expect(tierForMeasurement({ captureFps: 12, decodeMsPerFrame: 100 })).toBe(0);
+  it("defaults to T0 (platform QR detector) and offers grid tiers only when a pixel decode keeps up", () => {
+    expect(tierForMeasurement(undefined)).toBe(0);
+    expect(tierForMeasurement({ captureFps: 30, decodeMsPerFrame: 550 })).toBe(0);
+    expect(tierForMeasurement({ captureFps: 30, decodeMsPerFrame: 90 })).toBe(1);
+    expect(tierForMeasurement({ captureFps: 60, decodeMsPerFrame: 60 })).toBe(2);
+    expect(tierForMeasurement({ captureFps: 120, decodeMsPerFrame: 40 })).toBe(3);
+    expect(tierForMeasurement({ captureFps: 12, decodeMsPerFrame: 40 })).toBe(0);
   });
 });
 

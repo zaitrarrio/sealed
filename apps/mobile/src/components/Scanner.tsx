@@ -27,7 +27,7 @@ export interface ScannerProps {
   pasteLabel?: string;
 }
 
-export function Scanner({ onCode, label = "Point the camera at the code", pasteLabel = "Or paste a code or link" }: ScannerProps) {
+export function Scanner({ onCode, label = "Point the camera at the code — anywhere in view is fine", pasteLabel = "Or paste a code or link" }: ScannerProps) {
   const device = useCameraDevice("back");
   const { hasPermission, requestPermission } = useCameraPermission();
   const focused = useIsFocused();
@@ -113,7 +113,6 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
       ) : (
         <View style={styles.frame} accessibilityLabel={label}>
           <Camera style={StyleSheet.absoluteFill} device={device} isActive={cameraOn} outputs={outputs} onError={(e) => setMessage(e.message)} />
-          <View style={styles.reticle} pointerEvents="none" />
         </View>
       )}
       {trustAsk ? (
@@ -161,7 +160,7 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
 }
 
 export const scannerStyles = StyleSheet.create({
-  frame: { aspectRatio: 1, width: "100%", borderRadius: radius.lg, overflow: "hidden", backgroundColor: color.bgSunken },
-  reticle: { position: "absolute", left: "15%", top: "15%", right: "15%", bottom: "15%", borderWidth: 2, borderColor: color.amber, borderRadius: radius.md },
+  // Full frame, no alignment box: the platform detector finds a code anywhere in view.
+  frame: { aspectRatio: 3 / 4, width: "100%", borderRadius: radius.lg, overflow: "hidden", backgroundColor: color.bgSunken },
 });
 const styles = scannerStyles;

@@ -32,6 +32,7 @@ export default function Home() {
           <Tile title="Receive offline" desc="Show your key and read a stream from the sender's screen. No network needed." onPress={() => router.push("/offline/receive")} />
           <Tile title="Received files" right={received === null ? "…" : `${received}`} onPress={() => router.push("/files")} />
           <Tile title="Settings" right="relay, security" onPress={() => router.push("/settings")} />
+          <Tile title="Benchmark" right="offline speed" onPress={() => router.push("/bench")} testID="action-bench" />
         </Stack>
       </Screen>
     );
@@ -61,6 +62,7 @@ export default function Home() {
         <Tile title="Received files" right={received === null ? "…" : `${received}`} onPress={() => router.push("/files")} />
         <Tile title="Devices" right={`${devices} active`} onPress={() => router.push("/devices")} />
         <Tile title="Settings" right="relay, security" onPress={() => router.push("/settings")} />
+          <Tile title="Benchmark" right="offline speed" onPress={() => router.push("/bench")} testID="action-bench" />
       </Stack>
     </Screen>
   );

@@ -21,7 +21,7 @@ import { encodeFrameHeader } from "./header";
 import { encodeDescriptorPayload } from "./descriptor";
 import { calibrationPicture, dataPicture, gridLayout } from "./grid";
 import { renderPicture } from "./render";
-import { renderQrFrame } from "./qr";
+import { qrFrameText, renderQrFrame } from "./qr";
 import { isGridTier } from "./layout";
 import { Xorshift32, seedFrom } from "./random";
 
@@ -279,6 +279,16 @@ export class FacetSender {
       if (oldest !== undefined) this.frames.delete(oldest);
     }
     return { tier: f.tier, type: f.type, holdRefreshes: f.holdRefreshes, sequence: f.sequence };
+  }
+
+  /**
+   * The QR text of a T0 frame returned by a recent `next()` call (null for grid frames), for UIs that draw QR
+   * codes with a native renderer instead of `render()`.
+   */
+  qrText(frame: FacetFrame): string | null {
+    const f = this.frames.get(frame.sequence);
+    if (!f) throw new RangeError(`frame ${frame.sequence} is no longer available; use frames right after next()`);
+    return f.tier === 0 ? qrFrameText(f.header, f.payload) : null;
   }
 
   /** Renders a frame returned by a recent `next()` call as a square RGBA image. */

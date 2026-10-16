@@ -787,3 +787,40 @@ legend {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Step indicator (offline handshake: show, then switch). */
+.steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.steps .step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.steps .step.on {
+  border-color: var(--amber);
+  background: var(--amber-soft, rgba(232, 163, 61, 0.12));
+}
+.steps .step-n {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+.steps .step.on .step-n {
+  color: var(--amber);
+}
+.steps .step.done .step-n {
+  color: var(--success, #7fb77e);
+}
+.steps .step-label {
+  font-weight: 700;
+  font-size: 13px;
+}

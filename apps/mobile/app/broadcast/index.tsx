@@ -46,7 +46,7 @@ export default function BroadcastSend() {
           setBusy(true);
           setError(null);
           const publisher = sign && s.keys && s.chain ? { signing: s.keys.signing, fingerprint: s.chain.fingerprint, label: s.profile.label } : undefined;
-          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 1, interleaveCompatible: true })
+          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 0 })
             .then((r) => setSender(r.sender))
             .catch((e: unknown) => setError(errorMessage(e)))
             .finally(() => setBusy(false));

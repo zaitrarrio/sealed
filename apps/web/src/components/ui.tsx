@@ -85,3 +85,21 @@ export function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
 }
+
+/** A compact step indicator ("Step 1 They show, you film · Step 2 Switch: you show, they film"). */
+export function Steps({ steps, current }: { steps: readonly string[]; current: number }) {
+  return (
+    <ol className="steps" aria-label={`Step ${current} of ${steps.length}`}>
+      {steps.map((label, i) => {
+        const n = i + 1;
+        const state = n === current ? "on" : n < current ? "done" : "todo";
+        return (
+          <li key={label} className={`step ${state}`} aria-current={n === current ? "step" : undefined}>
+            <span className="step-n">{n < current ? "Done" : `Step ${n}`}</span>
+            <span className="step-label">{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

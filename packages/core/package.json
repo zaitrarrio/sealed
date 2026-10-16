@@ -17,7 +17,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench": "esbuild bench/optical.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bench/optical.mjs --log-level=warning && node dist/bench/optical.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "2.4.0",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@types/qrcode": "^1.5.5",
     "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "esbuild": "0.28.2"
   }
 }

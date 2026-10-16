@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FacetReceiver, FacetSender } from "../../src/facet/index";
 import { cellSizeFor, QR_QUIET_MODULES } from "../../src/facet/render";
+import { QR_VERSION } from "../../src/facet/qr";
 import type { Tier } from "../../src/facet/types";
 import { CameraChannel, Rng, type ChannelOptions } from "./channel";
 
@@ -34,7 +35,7 @@ describe("Facet synthetic camera round trip", () => {
       const receiver = new FacetReceiver();
       const channel = new CameraChannel({ seed: 200 + c.tier, ...c.channel });
       const size = 1000;
-      const cellPx = c.tier === 0 ? Math.floor(size / (97 + 2 * QR_QUIET_MODULES)) : cellSizeFor(size, c.tier === 3 ? 144 : 112);
+      const cellPx = c.tier === 0 ? Math.floor(size / (QR_VERSION * 4 + 17 + 2 * QR_QUIET_MODULES)) : cellSizeFor(size, c.tier === 3 ? 144 : 112);
       let frames = 0;
       let decodeMs = 0;
       while (frames < c.maxFrames && !receiver.progress.complete) {
