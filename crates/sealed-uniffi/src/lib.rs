@@ -121,3 +121,46 @@ pub unsafe extern "C" fn sealed_facet_push_frame(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uniffi_sha256() {
+        let input = b"hello sealed";
+        let mut out = [0u8; 32];
+        unsafe {
+            sealed_sha256(input.as_ptr(), input.len(), out.as_mut_ptr());
+        }
+        let expected = sealed_core::sha256(input);
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn test_uniffi_mnemonic_roundtrip() {
+        let secret = [42u8; 32];
+        let ptr = unsafe { sealed_mnemonic_from_secret(secret.as_ptr()) };
+        assert!(!ptr.is_null());
+
+        let mut recovered = [0u8; 32];
+        let res = unsafe { sealed_secret_from_mnemonic(ptr, recovered.as_mut_ptr()) };
+        assert_eq!(res, 0);
+        assert_eq!(recovered, secret);
+
+        unsafe { sealed_string_free(ptr) };
+    }
+
+    #[test]
+    fn test_uniffi_facet_lifecycle() {
+        let dec = sealed_facet_decoder_new(1);
+        assert!(!dec.is_null());
+
+        let rgba = vec![128u8; 64 * 64 * 4];
+        let anchors = [0.0f32, 0.0, 64.0, 0.0, 64.0, 64.0, 0.0, 64.0];
+        let status = unsafe { sealed_facet_push_frame(dec, 64, 64, rgba.as_ptr(), rgba.len(), anchors.as_ptr()) };
+        assert_eq!(status, 1);
+
+        unsafe { sealed_facet_decoder_free(dec) };
+    }
+}

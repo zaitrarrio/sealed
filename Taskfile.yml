@@ -52,6 +52,11 @@ tasks:
     cmds:
       - task: build
 
+  build:wasm:
+    desc: Build WebAssembly package for sealed-wasm via wasm-pack
+    cmds:
+      - bash tools/build-wasm.sh
+
   build:relay:
     desc: Build relay Worker to dist/ (alias for relay:build)
     cmds:

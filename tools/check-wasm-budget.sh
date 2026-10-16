@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Fail if gzipped WASM exceeds 1.5 MiB (spec §13 / ADR-0011).
 set -euo pipefail
-DIR="${1:-packages/core-wasm/pkg}"
+DIR="${1:-crates/sealed-wasm/pkg}"
+if [[ ! -d "$DIR" && -d "packages/core-wasm/pkg" ]]; then
+  DIR="packages/core-wasm/pkg"
+fi
 BUDGET=$((1536 * 1024))
 if [[ ! -d "$DIR" ]]; then
   echo "wasm pkg dir missing: $DIR (skip)"

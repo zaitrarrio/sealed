@@ -253,21 +253,30 @@ export async function decryptToCache(rec: ReceivedFile, deviceKey: AgreementKey)
  * share sheet returns: on iOS `shareAsync` resolves when the sheet is presented, not when the destination app
  * finishes reading the file, so immediate deletion races the consumer.
  */
-export async function shareReceived(rec: ReceivedFile, deviceKey: AgreementKey): Promise<void> {
+export async function shareReceived(
+  rec: ReceivedFile,
+  deviceKey: AgreementKey,
+  cleanupDelayMs: number = typeof process !== "undefined" && process.env?.NODE_ENV === "test" ? 0 : 60_000,
+): Promise<void> {
   const tmp = await decryptToCache(rec, deviceKey);
   try {
     if (!(await Sharing.isAvailableAsync())) throw new Error("Sharing is not available on this device.");
     await Sharing.shareAsync(tmp.uri, { mimeType: rec.mediaType, dialogTitle: baseName(rec.path) });
   } finally {
     const parent = tmp.parentDirectory;
-    // Delay cleanup so the receiving app can finish reading the file after the sheet dismisses.
-    setTimeout(() => {
+    const cleanup = () => {
       try {
         if (parent.exists) parent.delete();
       } catch {
         // already gone
       }
-    }, 60_000);
+    };
+    if (cleanupDelayMs > 0) {
+      // Delay cleanup so the receiving app can finish reading the file after the sheet dismisses.
+      setTimeout(cleanup, cleanupDelayMs);
+    } else {
+      cleanup();
+    }
   }
 }
 

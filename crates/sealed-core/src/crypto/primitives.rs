@@ -39,14 +39,14 @@ pub fn hkdf_sha256(ikm: &[u8], salt: &[u8], info: &[u8], len: usize) -> Result<V
 pub fn aes_gcm_seal(key: &[u8; 32], nonce: &[u8; 12], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::Authentication)?;
     cipher
-        .encrypt(Nonce::from_slice(nonce), Payload { msg: plaintext, aad })
+        .encrypt(&Nonce::from(*nonce), Payload { msg: plaintext, aad })
         .map_err(|_| CryptoError::Authentication)
 }
 
 pub fn aes_gcm_open(key: &[u8; 32], nonce: &[u8; 12], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::Authentication)?;
     cipher
-        .decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad })
+        .decrypt(&Nonce::from(*nonce), Payload { msg: ciphertext, aad })
         .map_err(|_| CryptoError::Authentication)
 }
 

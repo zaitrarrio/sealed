@@ -77,7 +77,7 @@ pub fn seal_base(recipient_pub: &[u8], info: &[u8], aad: &[u8], plaintext: &[u8]
         c.extend_from_slice(recipient_pub);
         c
     };
-    let eae_prk = labeled_extract(b"", b"eae_prk", dh.as_slice());
+    let eae_prk = labeled_extract(b"", b"eae_prk", &dh[..]);
     let shared_secret = labeled_expand(&eae_prk, b"shared_secret", &kem_context, 32);
 
     let key_schedule_context = {
@@ -116,7 +116,7 @@ pub fn open_base(recipient_secret: &SecretKey, enc: &[u8], info: &[u8], aad: &[u
         c.extend_from_slice(&pk_r_bytes);
         c
     };
-    let eae_prk = labeled_extract(b"", b"eae_prk", dh.as_slice());
+    let eae_prk = labeled_extract(b"", b"eae_prk", &dh[..]);
     let shared_secret = labeled_expand(&eae_prk, b"shared_secret", &kem_context, 32);
 
     let key_schedule_context = {
