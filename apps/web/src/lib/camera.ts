@@ -104,6 +104,23 @@ export async function lockCameraSettings(track: MediaStreamTrack): Promise<strin
   return locked;
 }
 
+/** Whether this track's camera has a torch the page can switch (Chrome on Android; not Safari). */
+export function torchSupported(track: MediaStreamTrack): boolean {
+  const caps = (typeof track.getCapabilities === "function" ? track.getCapabilities() : {}) as ExtendedCapabilities;
+  return caps.torch === true;
+}
+
+/** Switches the torch (ADR-0022 back-channel); resolves false where unsupported. */
+export async function setTorch(track: MediaStreamTrack, on: boolean): Promise<boolean> {
+  if (!torchSupported(track)) return false;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: on } as MediaTrackConstraintSet] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Restores continuous focus for QR scanning where supported. */
 export async function continuousFocus(track: MediaStreamTrack): Promise<void> {
   const caps = (typeof track.getCapabilities === "function" ? track.getCapabilities() : {}) as ExtendedCapabilities;

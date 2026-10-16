@@ -5,20 +5,41 @@
  * Live progress (coverage) comes back from the worker. Camera settings are locked after the stream is detected.
  */
 import { useEffect, useRef, useState } from "react";
-import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, stopStream, watchQrCodes } from "../lib/camera";
+import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, setTorch, stopStream, torchSupported, watchQrCodes } from "../lib/camera";
 import type { FromWorker, ToWorker, WorkerInit } from "../workers/facet-protocol";
 import { Notice } from "./ui";
 
 export type CaptureUpdate = Extract<FromWorker, { type: "progress" }>;
 export type CaptureResult = Extract<FromWorker, { type: "complete" }>;
 
-export function OpticalCapture({ init, onProgress, onComplete, onError }: { init: WorkerInit; onProgress: (p: CaptureUpdate) => void; onComplete: (r: CaptureResult) => void; onError: (message: string) => void }) {
+export function OpticalCapture({
+  init,
+  onProgress,
+  onComplete,
+  onError,
+  torch = false,
+  onTorchSupport,
+}: {
+  init: WorkerInit;
+  onProgress: (p: CaptureUpdate) => void;
+  onComplete: (r: CaptureResult) => void;
+  onError: (message: string) => void;
+  /** Torch on/off for the back-channel to the sender (ADR-0022). */
+  torch?: boolean;
+  onTorchSupport?: (supported: boolean) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const trackRef = useRef<MediaStreamTrack | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locked, setLocked] = useState<string[] | null>(null);
   const [reader, setReader] = useState<"detector" | "frames" | null>(null);
-  const cbs = useRef({ onProgress, onComplete, onError });
-  cbs.current = { onProgress, onComplete, onError };
+  const cbs = useRef({ onProgress, onComplete, onError, onTorchSupport });
+  cbs.current = { onProgress, onComplete, onError, onTorchSupport };
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (track) void setTorch(track, torch);
+  }, [torch]);
 
   useEffect(() => {
     const worker = new Worker(new URL("../workers/facet-decode.worker.ts", import.meta.url), { type: "module" });
@@ -55,6 +76,9 @@ export function OpticalCapture({ init, onProgress, onComplete, onError }: { init
         if (!video) return;
         video.srcObject = stream;
         await video.play().catch(() => undefined);
+        const track = stream.getVideoTracks()[0] ?? null;
+        trackRef.current = track;
+        if (track) cbs.current.onTorchSupport?.(torchSupported(track));
         const qrOnly = init.tiers !== undefined && init.tiers.every((t) => t === 0);
         const detector = qrOnly ? await qrDetector() : null;
         if (cancelled) return;
@@ -78,6 +102,7 @@ export function OpticalCapture({ init, onProgress, onComplete, onError }: { init
     return () => {
       cancelled = true;
       stopFeed?.();
+      trackRef.current = null;
       stopStream(stream);
       worker.terminate();
     };

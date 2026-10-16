@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeQrY4m } from "./qr-y4m";
+import { writeTorchY4m } from "./torch-y4m";
 import { writeFacetY4m } from "./y4m";
 
 const APP = process.env["SEALED_E2E_APP_URL"] ?? "http://localhost:5173";
@@ -176,6 +177,23 @@ test("Air-gap send: the app scans a reverse key code, shows the check code and s
   expect(result.path).toBe("sent.bin");
   expect(result.sha).toBe(sha256(payload));
   await page.getByTestId("stop-stream").click();
+  await context.close();
+});
+
+test("Torch back-channel: a receiver's torch flashing \"done\" makes the sender stop and report delivery", async () => {
+  // The fake camera plays the same file for the sender's front camera: a dim room with a spot blinking "done".
+  writeTorchY4m(video, "done");
+  const context = await browser.newContext({ baseURL: APP, viewport: { width: 1280, height: 720 }, reducedMotion: "no-preference" });
+  const page = await context.newPage();
+  const rxKey = new SoftwareAgreementKey();
+  const offer = createReverseKeyOffer(APP, { agreement: rxKey }, "Test receiver", 0);
+  await page.goto("/offline/send");
+  await page.getByTestId("paste-code").fill(offer.code);
+  await page.getByRole("button", { name: "Use this code" }).click();
+  await page.getByTestId("file-input").setInputFiles({ name: "sent.bin", mimeType: "application/octet-stream", buffer: randomBytes(5000) });
+  await expect(page.getByTestId("facet-canvas")).toBeVisible();
+  await expect(page.getByTestId("airgap-delivered")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("facet-canvas")).toHaveCount(0);
   await context.close();
 });
 

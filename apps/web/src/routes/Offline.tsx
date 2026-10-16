@@ -4,7 +4,7 @@
  * receiver's device key can open. Broadcast (open): the sender loops the stream and anyone in view can decode it.
  */
 import { compress, ctEqual, createReverseKeyOffer, describeQrStream, fromB64url, prepareAirgapStream, prepareBroadcastStream, qrStreamSetting, type FacetSender, type QrStreamSetting, type ParsedCode, type Tier } from "@sealed/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { FacetStream } from "../components/FacetStream";
 import { FilePicker } from "../components/FilePicker";
@@ -12,6 +12,10 @@ import { OpticalCapture, type CaptureResult, type CaptureUpdate } from "../compo
 import { QrCode } from "../components/QrCode";
 import { ReceivedFiles } from "../components/ReceivedFiles";
 import { Scanner } from "../components/Scanner";
+import { TorchBeacon } from "../components/TorchBeacon";
+import { TorchWatcher } from "../components/TorchWatcher";
+import { useLiveRate } from "../lib/rate-adapt";
+import { useTorchSignal } from "../lib/torch-signal";
 import { CheckCode, Notice, PageTitle, Progress, Spinner, Steps, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
 import { cameraAvailable } from "../lib/camera";
@@ -119,6 +123,8 @@ export function SendOfflinePage() {
   }, [rk]);
 
   const qrStream = useMemo(() => qrStreamSetting(s.settings.qrStream), [s.settings.qrStream]);
+  const onDelivered = useCallback(() => setConfirmed(false), []);
+  const live = useLiveRate(prepared?.sender ?? null, qrStream, onDelivered);
 
   // Turn 2 starts by itself: as soon as there is a key and files, encrypt and start streaming.
   useEffect(() => {
@@ -136,12 +142,30 @@ export function SendOfflinePage() {
 
   const bytes = totalSize(files);
 
+  if (prepared && live.delivered && !confirmed) {
+    return (
+      <div className="stack-lg" data-testid="airgap-delivered">
+        <PageTitle eyebrow="Delivered">Their device has the files</PageTitle>
+        <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testId="airgap-sender-sas" />
+        <p className="subtle">Their device signalled that everything arrived. If the safety codes differ, tell them to delete what they received.</p>
+        <Link className="btn primary" to="/">
+          Done
+        </Link>
+      </div>
+    );
+  }
+
   if (prepared && confirmed) {
     return (
       <div className="stack-lg">
         <Steps current={2} steps={["They show, you film", "Switch: you show, they film"]} />
         <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testId="airgap-sender-sas" />
-        <FacetStream sender={prepared.sender} codesPerScreen={qrStream.codesPerScreen} caption={describeQrStream(qrStream)} onStop={() => setConfirmed(false)} />
+        <FacetStream sender={prepared.sender} codesPerScreen={live.rate.codesPerScreen} caption={describeQrStream({ ...qrStream, ...live.rate })} onStop={() => setConfirmed(false)} />
+        <TorchWatcher onMessage={live.onMessage} />
+        <p className="subtle">
+          {live.last && live.last !== "done" ? `Their device asked for ${live.last} · ` : ""}
+          This device stops by itself when theirs flashes that the files arrived.
+        </p>
       </div>
     );
   }
@@ -227,6 +251,7 @@ export function ReceiveOfflinePage() {
   const [capturing, setCapturing] = useState(false);
   const [update, setUpdate] = useState<CaptureUpdate | null>(null);
   const [result, setResult] = useState<{ files: ReceivedFile[]; sender: CaptureResult["sender"] } | null>(null);
+  const signal = useTorchSignal();
   const [error, setError] = useState<string | null>(null);
   const [stored, setStored] = useState<StoredDeviceKeys | null>(null);
 
@@ -256,6 +281,8 @@ export function ReceiveOfflinePage() {
     return (
       <div className="stack-lg" data-testid="airgap-done">
         <PageTitle eyebrow="Received offline">{result.files.length === 1 ? "Your file is here" : `${result.files.length} files are here`}</PageTitle>
+        <TorchBeacon on={signal.torch} active={signal.busy} />
+        {signal.busy && <p className="subtle">Telling the sender it arrived (torch).</p>}
         {result.sender && <p className="muted">The sender calls themselves “{result.sender.label}”. Sealed cannot confirm that name; the check code is what tells you the stream came from the person in front of you.</p>}
         <ReceivedFiles files={result.files} />
         <Link to="/" className="btn ghost">
@@ -283,13 +310,18 @@ export function ReceiveOfflinePage() {
         <div className="stack">
           <OpticalCapture
             init={{ type: "init", mode: "airgap", ...(offer.tier === 0 ? { tiers: [0] } : {}), airgap: { agreementPrivate: stored.agreementPrivate, agreementPublic: stored.agreementPublic, signingPrivate: stored.signingPrivate, signingPublic: stored.signingPublic, nonce: offer.nonce } }}
-            onProgress={setUpdate}
-            onComplete={(r) =>
+            torch={signal.torch}
+            onProgress={(u) => {
+              setUpdate(u);
+              signal.report(u.progress);
+            }}
+            onComplete={(r) => {
+              signal.done();
               setResult({
                 files: memoryFiles(r.files.map((f) => ({ entry: { path: f.path, size: f.size, mediaType: f.mediaType, sha256: new Uint8Array(32), ...(f.mtime !== undefined ? { mtime: f.mtime } : {}) }, data: f.data }))),
                 sender: r.sender,
-              })
-            }
+              });
+            }}
             onError={setError}
           />
           <CaptureStatus update={update} />

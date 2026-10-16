@@ -16,7 +16,7 @@
 import { RaptorQEncoder, encodeOti, type Oti } from "../fec/index";
 import { randomBytes } from "../crypto/primitives";
 import type { FacetFrame, FrameType, RgbaImage, StreamDescriptor, Tier } from "./types";
-import { TIERS, planStreamOti, type GridTier } from "./tiers";
+import { QR_HOLDS, TIERS, planStreamOti, type GridTier } from "./tiers";
 import { encodeFrameHeader } from "./header";
 import { encodeDescriptorPayload } from "./descriptor";
 import { calibrationPicture, dataPicture, gridLayout } from "./grid";
@@ -140,6 +140,9 @@ class SymbolSchedule {
 }
 
 class TierStream {
+  setHold(hold: number): void {
+    this.hold = hold;
+  }
   readonly enc: RaptorQEncoder;
   readonly oti: Oti;
   readonly descriptor: StreamDescriptor;
@@ -149,7 +152,7 @@ class TierStream {
   private endSent = false;
   private descriptorPayload: Uint8Array;
   private readonly symbolSize: number;
-  private readonly hold: number;
+  private hold: number;
 
   constructor(
     readonly tier: Tier,
@@ -262,6 +265,15 @@ export class FacetSender {
       this.compatible = null;
     }
     this.compatibleDescriptor = this.compatible?.descriptor ?? null;
+  }
+
+  /**
+   * Changes the frame hold of the T0 stream for frames emitted from now on (ADR-0022 rate adaptation). The hold
+   * travels in each frame, so receivers need nothing. Grid tiers keep their fixed hold.
+   */
+  setQrHold(holdRefreshes60: number): void {
+    if (!(QR_HOLDS as readonly number[]).includes(holdRefreshes60)) throw new RangeError(`invalid QR hold ${holdRefreshes60}`);
+    for (const st of [this.primary, this.compatible]) if (st && st.tier === 0) st.setHold(holdRefreshes60);
   }
 
   /** True once a finite stream has emitted its end frame(s). Always false for looping streams. */

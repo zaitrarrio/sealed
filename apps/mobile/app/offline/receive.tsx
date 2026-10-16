@@ -11,6 +11,7 @@ import { createReverseKeyOffer, type Tier } from "@sealed/core";
 import { router } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
+import { CodeCamera } from "../../src/components/CodeCamera";
 import { OpticalCapture } from "../../src/components/OpticalCapture";
 import { QrCode } from "../../src/components/QrCode";
 import { ReceivedFiles } from "../../src/components/ReceivedFiles";
@@ -22,9 +23,12 @@ import { formatBytes } from "../../src/lib/bytes";
 import { deleteReceived, storeOpened, type ReceivedFile } from "../../src/lib/received";
 import { describeSender, type SenderView } from "../../src/lib/sender-check";
 import { session, useSession } from "../../src/lib/session";
+import { useTorchSignal } from "../../src/lib/torch-signal";
 import { Button, Card, CheckCode, Disclosure, Notice, P, Progress, Row, Screen, Segmented, Spinner, Title, errorMessage, fonts } from "../../src/ui/kit";
 
 const STEPS = ["You show, they film", "Switch: they show, you film"] as const;
+
+const NOOP = () => undefined;
 
 export default function ReceiveOffline() {
   const s = useSession();
@@ -35,6 +39,8 @@ export default function ReceiveOffline() {
   const [result, setResult] = useState<{ files: ReceivedFile[]; sender: SenderView | null; sas: string | null; kept: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastUpdate = useRef<DecodeProgress | null>(null);
+  // Torch back-channel: only the QR path keeps the camera's object output running while the torch plays.
+  const signal = useTorchSignal(decodePathFor(tier) === "codes");
 
   // One offer per tier choice: the nonce shown in the code must be the one kept for the safety code.
   useEffect(() => {
@@ -56,6 +62,14 @@ export default function ReceiveOffline() {
     return (
       <Screen>
         <Title eyebrow="Received offline">{n === 1 ? "Your file is here" : `${n} files are here`}</Title>
+        {signal.busy ? (
+          <Row>
+            <View style={{ width: 64, height: 48, borderRadius: 8, overflow: "hidden" }}>
+              <CodeCamera onCode={NOOP} torch={signal.torch} label="Telling the sender it arrived" />
+            </View>
+            <P tone="subtle">Telling their phone it arrived (torch).</P>
+          </Row>
+        ) : null}
         {result.sender ? (
           <P>{result.sender.verified ? `From ${result.sender.display}, a paired contact (signature matches their verified devices).` : `From ${result.sender.display}. Sealed cannot confirm who that is.`}</P>
         ) : null}
@@ -109,13 +123,17 @@ export default function ReceiveOffline() {
           <OpticalCapture
             decode={decodePathFor(tier)}
             options={options}
-            overlay={<LiveStatus update={update} />}
+            overlay={<LiveStatus update={update} signal={signal.last} />}
+            torch={signal.torch}
+            keepAlive={signal.busy}
             onProgress={(u) => {
               lastUpdate.current = u;
               setUpdate(u);
+              signal.report(u.progress);
             }}
             onComplete={(r) => {
               rememberPixelSpeed();
+              signal.done();
               if (!s.keys) return;
               const keys = s.keys;
               const sas = lastUpdate.current?.sas ?? null;
@@ -145,6 +163,7 @@ export default function ReceiveOffline() {
             tone="ghost"
             onPress={() => {
               rememberPixelSpeed();
+              signal.stop();
               setCapturing(false);
               setUpdate(null);
             }}
@@ -155,12 +174,13 @@ export default function ReceiveOffline() {
   );
 }
 
-function LiveStatus({ update }: { update: DecodeProgress | null }) {
+function LiveStatus({ update, signal }: { update: DecodeProgress | null; signal: string | null }) {
   const p = update?.progress;
+  const loss = p?.recentLoss !== null && p?.recentLoss !== undefined ? ` · missing ${Math.round(p.recentLoss * 100)}%` : "";
   const text = !p
     ? "Looking for their stream…"
     : p.framesDecoded === 0
       ? `Reading… ${p.framesSeen} codes seen, none from Sealed yet`
-      : `${Math.round(p.fraction * 100)}% · ${p.framesDecoded} frames · ${update.measurement.captureFps.toFixed(0)}/s`;
+      : `${Math.round(p.fraction * 100)}% · ${p.framesDecoded} frames · ${update.measurement.captureFps.toFixed(0)}/s${loss}${signal ? ` · torch: ${signal}` : ""}`;
   return <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: "#F4EDE4" }}>{text}</Text>;
 }

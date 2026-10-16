@@ -14,6 +14,7 @@ import { RaptorQDecoder, decodeOti } from "../fec/index";
 import { ctEqual } from "../bytes";
 import type { CapabilityMeasurement, ReceiveProgress, RgbaImage, StreamDescriptor, Tier } from "./types";
 import { TIERS, isT0SymbolSize, type GridTier } from "./tiers";
+import { LossEstimator } from "./backchannel";
 import { GridDetector, gridHomography, gridSizesFor, pixelsPerCell, type LumaPlane } from "./detect";
 import { anchorPoints, refineHomography } from "./refine";
 import { gridLayout, gridTierForSize } from "./layout";
@@ -69,6 +70,7 @@ function emptyProgress(): ReceiveProgress {
     blockCount: 0,
     fraction: 0,
     symbolSize: null,
+    recentLoss: null,
     calibrated: false,
     complete: false,
   };
@@ -90,6 +92,7 @@ export class FacetReceiver {
   private lastPixelsPerCell = NaN;
   private lastTier: Tier | null = null;
   private _progress: ReceiveProgress = emptyProgress();
+  private readonly lossEstimator = new LossEstimator();
 
   constructor(opts: FacetReceiverOptions = {}) {
     if (opts.expectedStreamId && opts.expectedStreamId.length !== 4) throw new RangeError("expectedStreamId must be 4 bytes");
@@ -372,6 +375,7 @@ export class FacetReceiver {
     // data
     const key = `${h.sbn}/${h.esi}`;
     if (st.seen.has(key)) return true;
+    this.lossEstimator.accept(h.sbn, h.esi);
     if (!st.decoder) {
       if (st.pending.length < MAX_PENDING) {
         st.pending.push({ sbn: h.sbn, esi: h.esi, symbol: payload.slice() });
@@ -410,6 +414,7 @@ export class FacetReceiver {
     p.streamId = this.streamId ? this.streamId.slice() : null;
     p.framesSeen = this.framesSeen;
     p.framesDecoded = this.framesDecoded;
+    p.recentLoss = this.lossEstimator.loss;
     p.calibrated = this.calibration.size > 0;
     if (best) {
       const dec = best.dec;

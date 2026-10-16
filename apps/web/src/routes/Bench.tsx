@@ -7,12 +7,14 @@
  * macOS, Edge), otherwise it hands camera frames to Sealed's own decoder in a worker. The report says which.
  */
 import { BENCHMARK_SIZES, DEFAULT_QR_STREAM, QR_HOLDS, QR_PROFILES, describeQrStream, formatBenchmarkReport, isDefaultQrStream, qrStreamSetting, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type Tier } from "@sealed/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FacetStream } from "../components/FacetStream";
 import { Notice, PageTitle, Progress, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
 import { session, useSession } from "../lib/session";
-import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, stopStream, watchQrCodes } from "../lib/camera";
+import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, setTorch, stopStream, torchSupported, watchQrCodes } from "../lib/camera";
+import { TorchWatcher } from "../components/TorchWatcher";
+import { TorchPlayer, type TorchMessage } from "@sealed/core";
 import type { FromBenchWorker, ToBenchWorker } from "../workers/bench.worker";
 
 type Role = "film" | "show";
@@ -58,7 +60,12 @@ function ShowStream() {
 
   if (stream) {
     const profile = stream.tier === 0 ? `QR ${stream.qr.symbolSize} B × ${codes} at ${60 / stream.qr.holdRefreshes60}/s` : `T${stream.tier}`;
-    return <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? codes : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} />;
+    return (
+      <div className="stack">
+        <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? codes : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} />
+        <TorchReadout />
+      </div>
+    );
   }
 
   return (
@@ -145,6 +152,26 @@ function ShowStream() {
   );
 }
 
+/** Front-camera view of the other device's torch: brightness, gate state and decoded messages (ADR-0022). */
+function TorchReadout() {
+  const [sample, setSample] = useState<{ brightness: number; on: boolean } | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="card stack" data-testid="torch-readout">
+      <TorchWatcher onMessage={(m: TorchMessage) => setLog((l) => [`${new Date().toLocaleTimeString()} ${m}`, ...l].slice(0, 6))} onSample={(brightness, on) => setSample({ brightness, on })} onError={setError} />
+      <p className="subtle" style={{ margin: 0 }}>
+        Back-channel (front camera watching their torch)
+      </p>
+      <pre className="mono" style={{ margin: 0, fontSize: 12 }}>
+        {sample ? `brightness ${sample.brightness.toFixed(0)} · torch ${sample.on ? "ON" : "off"}` : "no frames yet"}
+        {log.map((l) => `\n${l}`).join("")}
+      </pre>
+      {error && <Notice tone="danger">{error}</Notice>}
+    </div>
+  );
+}
+
 /**
  * Saves the shown setting for this device's offline sends. The sender decides how codes are drawn, so the choice
  * lives on the showing side: once the other device reports "verified" at a good speed, keep it.
@@ -180,6 +207,10 @@ function FilmStream() {
   const [camera, setCamera] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [torchOk, setTorchOk] = useState<boolean | null>(null);
+  const track = useRef<MediaStreamTrack | null>(null);
+  const player = useMemo(() => new TorchPlayer((on) => void (track.current && setTorch(track.current, on))), []);
+  useEffect(() => () => player.stop(), [player]);
 
   useEffect(() => {
     if (!running) return;
@@ -207,6 +238,8 @@ function FilmStream() {
         if (!video) return;
         video.srcObject = stream;
         await video.play().catch(() => undefined);
+        track.current = stream.getVideoTracks()[0] ?? null;
+        setTorchOk(track.current ? torchSupported(track.current) : false);
         const fps = stream.getVideoTracks()[0]?.getSettings().frameRate;
         setCamera(fps ? `camera ${Math.round(fps)} fps (reads cleanly up to ${Math.floor(fps / 2)} frames/s)` : "camera fps unknown");
         const detector = await qrDetector();
@@ -226,6 +259,7 @@ function FilmStream() {
     return () => {
       cancelled = true;
       stop?.();
+      track.current = null;
       stopStream(stream);
       // Let the last report arrive before the worker goes away.
       worker.postMessage({ type: "stop" } satisfies ToBenchWorker);
@@ -260,6 +294,24 @@ function FilmStream() {
         </div>
       )}
       {reader && running && <p className="subtle">{reader === "detector" ? "Reading with the browser's QR detector." : "This browser has no QR detector: decoding camera frames in JavaScript (slower)."}</p>}
+      {running && torchOk !== null && (
+        <div className="stack">
+          <p className="subtle">{torchOk ? "Flash the torch at the showing device (its screen should say what it read):" : "This browser cannot switch the torch, so it cannot signal the sender."}</p>
+          {torchOk && (
+            <div className="row">
+              <button type="button" className="btn small" onClick={() => player.play("slower")}>
+                Slower
+              </button>
+              <button type="button" className="btn small" onClick={() => player.play("faster")}>
+                Faster
+              </button>
+              <button type="button" className="btn small" onClick={() => player.play("done")}>
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {running && (
         <button type="button" className="btn ghost" onClick={() => setRunning(false)}>
           Stop

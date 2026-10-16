@@ -41,9 +41,11 @@ export interface CodeCameraProps {
   onLock?: (result: LockResult | null) => void;
   /** Reports the camera frame rate the session actually got (the sender's frame rate should stay below half of it). */
   onCameraFps?: (fps: number | null) => void;
+  /** Torch on/off: the back-channel to the sender's front camera (ADR-0022). */
+  torch?: boolean;
 }
 
-export function CodeCamera({ onCode, active = true, label = "Camera view of the other screen", overlay, onError, onLock, onCameraFps }: CodeCameraProps) {
+export function CodeCamera({ onCode, active = true, label = "Camera view of the other screen", overlay, onError, onLock, onCameraFps, torch = false }: CodeCameraProps) {
   const device = useCameraDevice("back");
   const { hasPermission, requestPermission } = useCameraPermission();
   const focused = useIsFocused();
@@ -147,6 +149,7 @@ export function CodeCamera({ onCode, active = true, label = "Camera view of the 
           isActive={active && focused && appActive}
           outputs={outputs}
           constraints={SCREEN_READER_CONSTRAINTS}
+          torchMode={torch ? "on" : "off"}
           resizeMode="cover"
           onSessionConfigSelected={(c) => fpsCb.current?.(c.selectedFPS ?? null)}
           onSubjectAreaChanged={release}

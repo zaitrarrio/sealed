@@ -9,9 +9,11 @@
 import { BENCHMARK_SIZES, BenchmarkMeter, DEFAULT_QR_STREAM, QR_HOLDS, QR_PROFILES, describeQrStream, formatBenchmarkReport, isDefaultQrStream, qrStreamSetting, type QrStreamSetting, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type RgbaImage, type Tier } from "@sealed/core";
 import * as Clipboard from "expo-clipboard";
 import * as Device from "expo-device";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Share, Text, View } from "react-native";
 import { CodeCamera } from "../src/components/CodeCamera";
+import { TorchWatcher } from "../src/components/TorchWatcher";
+import { TorchPlayer, type TorchMessage } from "@sealed/core";
 import type { LockResult } from "../src/lib/camera-lock";
 import { FacetStream } from "../src/components/FacetStream";
 import { PixelCamera } from "../src/components/PixelCamera";
@@ -67,6 +69,7 @@ function ShowStream() {
     return (
       <View style={{ gap: 12 }}>
         <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? Number(codes) : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} reduceMotion={s.settings.reduceMotion ?? false} />
+        <TorchReadout />
         <P tone="subtle">The stream repeats until you stop it. The filming phone can start at any time.</P>
       </View>
     );
@@ -129,6 +132,28 @@ function ShowStream() {
   );
 }
 
+/** Front-camera view of the other phone's torch: brightness, gate state and decoded messages (ADR-0022). */
+function TorchReadout() {
+  const [sample, setSample] = useState<{ brightness: number; on: boolean } | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const onMessage = useCallback((m: TorchMessage) => setLog((l) => [`${new Date().toLocaleTimeString()} ${m}`, ...l].slice(0, 6)), []);
+  const onSample = useCallback((brightness: number, on: boolean) => setSample({ brightness, on }), []);
+  return (
+    <Card>
+      <TorchWatcher onMessage={onMessage} onSample={onSample} onError={setError} />
+      <P tone="subtle">Back-channel (front camera watching their torch)</P>
+      <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: "#CFC4B8" }}>{sample ? `brightness ${sample.brightness.toFixed(0)} · torch ${sample.on ? "ON" : "off"}` : "no frames yet"}</Text>
+      {log.map((l) => (
+        <Text key={l} style={{ fontFamily: fonts.mono, fontSize: 12, color: "#F4EDE4" }}>
+          {l}
+        </Text>
+      ))}
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+    </Card>
+  );
+}
+
 /**
  * Saves the shown setting for this phone's offline sends. The sender decides how codes are drawn, so the choice
  * lives on the showing side: once the other phone reports "verified" at a good speed, keep it.
@@ -159,6 +184,9 @@ function FilmStream() {
   const [copied, setCopied] = useState(false);
   const [lock, setLock] = useState<LockResult | null>(null);
   const [cameraFps, setCameraFps] = useState<number | null>(null);
+  const [torch, setTorch] = useState(false);
+  const player = useMemo(() => new TorchPlayer(setTorch), []);
+  useEffect(() => () => player.stop(), [player]);
 
   // Live numbers four times a second while running.
   useEffect(() => {
@@ -210,10 +238,20 @@ function FilmStream() {
       {!running ? <Button title={report ? "Film again" : "Start filming"} tone="primary" onPress={start} testID="bench-film" /> : null}
       {running ? (
         path === "codes" ? (
-          <CodeCamera key={run} onCode={onCode} onLock={setLock} onCameraFps={setCameraFps} overlay={overlay} label="Camera view of the test stream" />
+          <CodeCamera key={run} onCode={onCode} onLock={setLock} onCameraFps={setCameraFps} torch={torch} overlay={overlay} label="Camera view of the test stream" />
         ) : (
           <PixelCamera key={run} onImage={onImage} overlay={overlay} label="Camera view of the test stream" />
         )
+      ) : null}
+      {running && path === "codes" ? (
+        <>
+          <P tone="subtle">Flash the torch at the showing phone (its screen should say what it read):</P>
+          <Row>
+            <Button small title="Slower" onPress={() => player.play("slower")} />
+            <Button small title="Faster" onPress={() => player.play("faster")} />
+            <Button small title="Done" onPress={() => player.play("done")} />
+          </Row>
+        </>
       ) : null}
       {running ? <Button title="Stop" tone="ghost" onPress={() => setRunning(false)} /> : null}
       {full ? (

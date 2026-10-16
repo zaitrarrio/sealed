@@ -70,6 +70,8 @@ export interface ReceiveProgress {
   fraction: number;
   /** Bytes per symbol of the stream being decoded, once its descriptor is known. */
   symbolSize: number | null;
+  /** Fraction of recent data frames missed, from gaps in the ESI sequence; null until enough frames (ADR-0022). */
+  recentLoss: number | null;
   calibrated: boolean;
   complete: boolean;
 }

@@ -19,6 +19,10 @@ interface CaptureProps {
   onError: (message: string) => void;
   /** Shown over the camera view. */
   overlay?: ReactNode;
+  /** Torch on/off for the back-channel (codes path only). */
+  torch?: boolean;
+  /** Keep the camera running after completion, while the torch signals "done". */
+  keepAlive?: boolean;
 }
 
 type Push = (session: FacetDecodeSession) => Promise<{ update: DecodeProgress; result?: DecodeResult }>;
@@ -68,10 +72,10 @@ export function OpticalCapture({ decode = "codes", ...props }: CaptureProps & { 
   return decode === "codes" ? <CodeCapture {...props} /> : <PixelCapture {...props} />;
 }
 
-function CodeCapture({ options, onProgress, onComplete, onError, overlay }: CaptureProps) {
+function CodeCapture({ options, onProgress, onComplete, onError, overlay, torch = false, keepAlive = false }: CaptureProps) {
   const { feed, done, reportError } = useDecoder(options, onProgress, onComplete, onError);
   const onCode = useCallback((text: string, at: number) => void feed((s) => s.pushCode(text, at)), [feed]);
-  return <CodeCamera onCode={onCode} active={!done} onError={reportError} {...(overlay ? { overlay } : {})} />;
+  return <CodeCamera onCode={onCode} active={!done || keepAlive} torch={torch} onError={reportError} {...(overlay ? { overlay } : {})} />;
 }
 
 function PixelCapture({ options, onProgress, onComplete, onError, overlay }: CaptureProps) {

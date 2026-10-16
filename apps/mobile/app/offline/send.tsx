@@ -8,13 +8,15 @@
  * chosen before or after filming the key code.
  */
 import { compress, ctEqual, describeQrStream, prepareAirgapStream, qrStreamSetting, type FacetSender, type QrStreamSetting, type ParsedCode } from "@sealed/core";
-import { useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { FacetStream } from "../../src/components/FacetStream";
 import { FilePicker } from "../../src/components/FilePicker";
 import { Scanner } from "../../src/components/Scanner";
 import { Steps } from "../../src/components/Steps";
+import { TorchWatcher } from "../../src/components/TorchWatcher";
+import { useLiveRate } from "../../src/lib/rate-adapt";
 import { takeCode } from "../../src/lib/code-stash";
 import { acceptedOrigins } from "../../src/lib/config";
 import { cachedChain, listContacts } from "../../src/lib/contacts-store";
@@ -80,6 +82,8 @@ export default function SendOffline() {
   }, [rk]);
 
   const qrStream = useMemo(() => qrStreamSetting(s.settings.qrStream), [s.settings.qrStream]);
+  const onDelivered = useCallback(() => setStreaming(false), []);
+  const live = useLiveRate(prepared?.sender ?? null, qrStream, onDelivered);
 
   // Turn 2 starts by itself: as soon as there is a key and files, encrypt and stream.
   useEffect(() => {
@@ -98,14 +102,26 @@ export default function SendOffline() {
   const bytes = totalSize(files);
   const step = !rk ? 1 : 2;
 
+  if (prepared && live.delivered && !streaming) {
+    return (
+      <Screen>
+        <Title eyebrow="Delivered">Their phone has the files</Title>
+        <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testID="airgap-sender-sas" />
+        <P tone="subtle">Their phone signalled that everything arrived. If the safety codes differ, tell them to delete what they received.</P>
+        <Button title="Done" tone="primary" onPress={() => router.replace("/")} />
+      </Screen>
+    );
+  }
+
   if (prepared && streaming) {
     return (
       <Screen>
         <Steps current={2} steps={["They show, you film", "Switch: you show, they film"]} />
         <Title eyebrow="Your turn to show">Turn your screen toward them</Title>
         <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testID="airgap-sender-sas" />
-        <FacetStream sender={prepared.sender} codesPerScreen={qrStream.codesPerScreen} caption={describeQrStream(qrStream)} onStop={() => setStreaming(false)} reduceMotion={s.settings.reduceMotion ?? false} />
-        <P tone="subtle">Keep streaming until their phone says the files arrived. If the safety codes differ, stop: the key code was not theirs.</P>
+        <FacetStream sender={prepared.sender} codesPerScreen={live.rate.codesPerScreen} caption={describeQrStream({ ...qrStream, ...live.rate })} onStop={() => setStreaming(false)} reduceMotion={s.settings.reduceMotion ?? false} />
+        <TorchWatcher onMessage={live.onMessage} />
+        <P tone="subtle">{live.last && live.last !== "done" ? `Their phone asked for ${live.last} · ` : ""}This phone stops by itself when theirs flashes that the files arrived. If the safety codes differ, stop: the key code was not theirs.</P>
       </Screen>
     );
   }
