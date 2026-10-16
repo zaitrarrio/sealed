@@ -3,16 +3,20 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "typecheck": "pnpm -r --parallel typecheck",
-    "test": "pnpm -r test",
-    "build": "pnpm -r build",
+    "dev": "turbo dev",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "build": "turbo build",
     "eas-build-post-install": "pnpm --filter @sealed/mobile run eas-build-post-install"
   },
   "devDependencies": {
+    "@types/node": "^22.15.0",
+    "turbo": "^2.11.8",
     "typescript": "5.9.3",
-    "vitest": "4.1.11",
-    "@types/node": "^22.15.0"
+    "vitest": "4.1.11"
   }
 }

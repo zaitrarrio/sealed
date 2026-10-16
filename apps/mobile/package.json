@@ -4,7 +4,9 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
+    "dev": "expo start --dev-client",
     "start": "expo start --dev-client",
+    "build": "expo export --platform ios --platform android --output-dir dist",
     "ios": "expo run:ios",
     "android": "expo run:android",
     "typecheck": "tsc --noEmit -p tsconfig.json",
