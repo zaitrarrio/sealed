@@ -1,6 +1,6 @@
 /** Share offline · Anyone watching (Broadcast, spec §3.7, §6.6): a looping, unencrypted-to-anyone stream. */
-import { prepareBroadcastStream, type FacetSender } from "@sealed/core";
-import { useState } from "react";
+import { describeQrStream, prepareBroadcastStream, qrStreamSetting, type FacetSender } from "@sealed/core";
+import { useMemo, useState } from "react";
 import { FacetStream } from "../../src/components/FacetStream";
 import { FilePicker } from "../../src/components/FilePicker";
 import { toEnvelopeInputs } from "../../src/lib/files";
@@ -16,11 +16,12 @@ export default function BroadcastSend() {
   const [sender, setSender] = useState<FacetSender | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const qrStream = useMemo(() => qrStreamSetting(s.settings.qrStream), [s.settings.qrStream]);
 
   if (sender) {
     return (
       <Screen padded={false}>
-        <FacetStream sender={sender} caption="broadcast" onStop={() => setSender(null)} reduceMotion={s.settings.reduceMotion ?? false} />
+        <FacetStream sender={sender} codesPerScreen={qrStream.codesPerScreen} caption={`broadcast · ${describeQrStream(qrStream)}`} onStop={() => setSender(null)} reduceMotion={s.settings.reduceMotion ?? false} />
       </Screen>
     );
   }
@@ -46,7 +47,7 @@ export default function BroadcastSend() {
           setBusy(true);
           setError(null);
           const publisher = sign && s.keys && s.chain ? { signing: s.keys.signing, fingerprint: s.chain.fingerprint, label: s.profile.label } : undefined;
-          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 0 })
+          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 0, qr: qrStream })
             .then((r) => setSender(r.sender))
             .catch((e: unknown) => setError(errorMessage(e)))
             .finally(() => setBusy(false));

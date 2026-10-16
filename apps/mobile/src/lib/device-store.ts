@@ -29,6 +29,8 @@ export interface Settings {
   trustedCodeOrigins?: string[];
   /** Last measured optical decode performance, used to choose the capability tier of the next key code. */
   opticalMeasurement?: { captureFps: number; decodeMsPerFrame: number; at: number };
+  /** How this phone draws QR streams when sending offline (set from the Benchmark; ADR-0020). */
+  qrStream?: { symbolSize: number; codesPerScreen: 1 | 2 | 4; holdRefreshes60: number };
 }
 
 export function defaultDeviceLabel(): string {

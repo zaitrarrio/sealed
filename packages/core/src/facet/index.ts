@@ -2,7 +2,7 @@
  * Facet optical codec (spec §7) and the optical transfer flows (spec §6.5–6.6).
  */
 export * from "./types";
-export { QR_HOLDS, QR_PROFILES, T0_MAX_SYMBOL, TIERS, TIER_REQUIREMENTS, chooseTier, isT0SymbolSize, planStreamOti, type TierSpec, type TierRequirement } from "./tiers";
+export { DEFAULT_QR_STREAM, QR_HOLDS, QR_PROFILES, T0_MAX_SYMBOL, describeQrStream, isDefaultQrStream, qrStreamSetting, type QrStreamSetting, TIERS, TIER_REQUIREMENTS, chooseTier, isT0SymbolSize, planStreamOti, type TierSpec, type TierRequirement } from "./tiers";
 export { FacetSender, type FacetSenderOptions } from "./sender";
 export { FacetReceiver, type FacetReceiverOptions } from "./receiver";
 export {

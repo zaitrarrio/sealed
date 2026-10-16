@@ -26,6 +26,8 @@ export interface Settings {
   pushEnabled?: boolean;
   /** Other Sealed client origins the user chose to trust for codes (e.g. sealed.to codes on a dev server). */
   trustedCodeOrigins?: string[];
+  /** How this browser draws QR streams when sending offline (set from the Benchmark; ADR-0020). */
+  qrStream?: { symbolSize: number; codesPerScreen: 1 | 2 | 4; holdRefreshes60: number };
 }
 
 /** Loads this browser's device keys, generating and persisting them on first use (receivers need no account). */

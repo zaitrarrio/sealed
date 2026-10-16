@@ -6,7 +6,7 @@
  * T0 (QR) is read by the platform detector, as real offline transfers are. The colour-grid tiers use the
  * JavaScript pixel decoder, which is why they are marked experimental.
  */
-import { BENCHMARK_SIZES, BenchmarkMeter, QR_HOLDS, QR_PROFILES, formatBenchmarkReport, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type RgbaImage, type Tier } from "@sealed/core";
+import { BENCHMARK_SIZES, BenchmarkMeter, DEFAULT_QR_STREAM, QR_HOLDS, QR_PROFILES, describeQrStream, formatBenchmarkReport, isDefaultQrStream, qrStreamSetting, type QrStreamSetting, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type RgbaImage, type Tier } from "@sealed/core";
 import * as Clipboard from "expo-clipboard";
 import * as Device from "expo-device";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -47,14 +47,18 @@ export default function Bench() {
 
 function ShowStream() {
   const s = useSession();
+  const saved = qrStreamSetting(s.settings.qrStream);
   const [size, setSize] = useState<string>(String(BENCHMARK_SIZES[1]));
   const [tier, setTier] = useState<TierChoice>("0");
-  const [qrSize, setQrSize] = useState<string>(String(QR_PROFILES[0].symbolSize));
-  const [codes, setCodes] = useState<"1" | "2" | "4">("1");
-  const [hold, setHold] = useState<string>("6");
+  const [qrSize, setQrSize] = useState<string>(String(saved.symbolSize));
+  const [codes, setCodes] = useState<"1" | "2" | "4">(String(saved.codesPerScreen) as "1" | "2" | "4");
+  const [hold, setHold] = useState<string>(String(saved.holdRefreshes60));
   const [stream, setStream] = useState<BenchmarkStream | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const chosen = qrStreamSetting({ symbolSize: Number(qrSize), codesPerScreen: Number(codes), holdRefreshes60: Number(hold) });
+  const isSaved = chosen.symbolSize === saved.symbolSize && chosen.codesPerScreen === saved.codesPerScreen && chosen.holdRefreshes60 === saved.holdRefreshes60;
 
   if (stream) {
     const fps = 60 / stream.qr.holdRefreshes60;
@@ -99,6 +103,7 @@ function ShowStream() {
           <P tone="subtle">Frames per second (on a 60 Hz screen)</P>
           <Segmented label="Frames per second" value={hold} onChange={setHold} options={QR_HOLDS.map((h) => [String(h), `${60 / h}/s`] as const)} />
           <P tone="subtle">{`Sends at most ${nominal.toFixed(0)} KB/s; the filming phone shows how much it actually reads.`}</P>
+          <P tone="subtle">{`Your offline transfers use ${describeQrStream(saved)}${isDefaultQrStream(saved) ? " (the default)" : ""}.`}</P>
         </>
       ) : (
         <Notice>Grid tiers are experimental: the filming phone decodes them in JavaScript, about two frames a second at best.</Notice>
@@ -118,7 +123,29 @@ function ShowStream() {
             .finally(() => setBusy(false));
         }}
       />
+      {tier === "0" ? <UseForTransfers chosen={chosen} isSaved={isSaved} /> : null}
     </Stack>
+  );
+}
+
+/**
+ * Saves the shown setting for this phone's offline sends. The sender decides how codes are drawn, so the choice
+ * lives on the showing side: once the other phone reports "verified" at a good speed, keep it.
+ */
+function UseForTransfers({ chosen, isSaved }: { chosen: QrStreamSetting; isSaved: boolean }) {
+  if (isSaved) {
+    return (
+      <Row>
+        <P tone="subtle">Your offline transfers already use this setting.</P>
+        {!isDefaultQrStream(chosen) ? <Button small tone="ghost" title="Back to default" onPress={() => void session.updateSettings({ qrStream: { ...DEFAULT_QR_STREAM } })} /> : null}
+      </Row>
+    );
+  }
+  return (
+    <Card>
+      <P>After a test: if the other phone reached “verified” quickly, keep this setting for when this phone sends offline.</P>
+      <Button title={`Use ${describeQrStream(chosen)} for my offline transfers`} testID="bench-use" onPress={() => void session.updateSettings({ qrStream: chosen })} />
+    </Card>
   );
 }
 

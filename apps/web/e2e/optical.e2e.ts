@@ -179,6 +179,34 @@ test("Air-gap send: the app scans a reverse key code, shows the check code and s
   await context.close();
 });
 
+test("Benchmark → transfers: a setting kept on the showing side is what offline sends then use", async () => {
+  const context = await browser.newContext({ baseURL: APP, viewport: { width: 1280, height: 720 }, reducedMotion: "no-preference" });
+  const page = await context.newPage();
+  await page.goto("/bench");
+  await page.getByTestId("bench-role-show").check();
+  await expect(page.getByTestId("bench-saved")).toContainText("840 B × 1 at 10/s");
+  await expect(page.getByTestId("bench-saved")).toContainText("(the default)");
+  await page.getByTestId("bench-qr-size").selectOption("1664");
+  await page.getByTestId("bench-codes").selectOption("2");
+  await page.getByTestId("bench-fps").selectOption("3");
+  await page.getByTestId("bench-show").click();
+  await expect(page.getByTestId("facet-canvas")).toBeVisible();
+  await page.getByTestId("stop-stream").click();
+  await page.getByTestId("bench-use").click();
+  await expect(page.getByTestId("bench-use-saved")).toBeVisible();
+
+  // Kept across reloads, and drawn by Broadcast.
+  await page.goto("/bench");
+  await page.getByTestId("bench-role-show").check();
+  await expect(page.getByTestId("bench-saved")).toContainText("v30 · 1,664 B × 2 at 20/s");
+  await page.goto("/broadcast");
+  await page.getByTestId("file-input").setInputFiles({ name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+  await page.getByTestId("broadcast-ack").check();
+  await page.getByTestId("start-broadcast").click();
+  await expect(page.getByText("broadcast · v30 · 1,664 B × 2 at 20/s")).toBeVisible();
+  await context.close();
+});
+
 test("reduced motion: the stream waits behind a flashing-content confirmation", async () => {
   const context = await browser.newContext({ baseURL: APP, reducedMotion: "reduce" });
   const page = await context.newPage();

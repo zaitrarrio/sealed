@@ -6,11 +6,12 @@
  * The filming side reads QR frames with the browser's BarcodeDetector when it has one (Chrome on Android and
  * macOS, Edge), otherwise it hands camera frames to Sealed's own decoder in a worker. The report says which.
  */
-import { BENCHMARK_SIZES, QR_HOLDS, QR_PROFILES, formatBenchmarkReport, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type Tier } from "@sealed/core";
+import { BENCHMARK_SIZES, DEFAULT_QR_STREAM, QR_HOLDS, QR_PROFILES, describeQrStream, formatBenchmarkReport, isDefaultQrStream, qrStreamSetting, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type Tier } from "@sealed/core";
 import { useEffect, useRef, useState } from "react";
 import { FacetStream } from "../components/FacetStream";
 import { Notice, PageTitle, Progress, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
+import { session, useSession } from "../lib/session";
 import { CameraError, feedFrames, openCamera, qrDetector, stopStream, watchQrCodes } from "../lib/camera";
 import type { FromBenchWorker, ToBenchWorker } from "../workers/bench.worker";
 
@@ -41,14 +42,19 @@ export function BenchPage() {
 }
 
 function ShowStream() {
+  const s = useSession();
+  const saved = qrStreamSetting(s.settings.qrStream);
   const [size, setSize] = useState<number>(BENCHMARK_SIZES[1]);
   const [tier, setTier] = useState<Tier>(0);
-  const [qrSize, setQrSize] = useState<number>(QR_PROFILES[0].symbolSize);
-  const [codes, setCodes] = useState(1);
-  const [hold, setHold] = useState<number>(6);
+  const [qrSize, setQrSize] = useState<number>(saved.symbolSize);
+  const [codes, setCodes] = useState<number>(saved.codesPerScreen);
+  const [hold, setHold] = useState<number>(saved.holdRefreshes60);
   const [stream, setStream] = useState<BenchmarkStream | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const chosen = qrStreamSetting({ symbolSize: qrSize, codesPerScreen: codes, holdRefreshes60: hold });
+  const isSaved = chosen.symbolSize === saved.symbolSize && chosen.codesPerScreen === saved.codesPerScreen && chosen.holdRefreshes60 === saved.holdRefreshes60;
 
   if (stream) {
     const profile = stream.tier === 0 ? `QR ${stream.qr.symbolSize} B × ${codes} at ${60 / stream.qr.holdRefreshes60}/s` : `T${stream.tier}`;
@@ -109,6 +115,10 @@ function ShowStream() {
             </select>
           </label>
           <p className="subtle">Sends at most {((qrSize * codes * (60 / hold)) / 1024).toFixed(0)} KB/s; the filming device shows how much it actually reads.</p>
+          <p className="subtle" data-testid="bench-saved">
+            Your offline transfers use {describeQrStream(saved)}
+            {isDefaultQrStream(saved) ? " (the default)" : ""}.
+          </p>
         </>
       ) : (
         <Notice>Grid streams are decoded in JavaScript on the filming side, a frame or two per second at best.</Notice>
@@ -129,6 +139,34 @@ function ShowStream() {
         }}
       >
         {busy ? "Preparing…" : "Show test stream"}
+      </button>
+      {tier === 0 && <UseForTransfers chosen={chosen} isSaved={isSaved} />}
+    </div>
+  );
+}
+
+/**
+ * Saves the shown setting for this device's offline sends. The sender decides how codes are drawn, so the choice
+ * lives on the showing side: once the other device reports "verified" at a good speed, keep it.
+ */
+function UseForTransfers({ chosen, isSaved }: { chosen: ReturnType<typeof qrStreamSetting>; isSaved: boolean }) {
+  if (isSaved) {
+    return (
+      <p className="subtle" data-testid="bench-use-saved">
+        Your offline transfers already use this setting.{" "}
+        {!isDefaultQrStream(chosen) && (
+          <button type="button" className="btn small ghost" onClick={() => void session.updateSettings({ qrStream: { ...DEFAULT_QR_STREAM } })}>
+            Back to default
+          </button>
+        )}
+      </p>
+    );
+  }
+  return (
+    <div className="card stack">
+      <p style={{ margin: 0 }}>After a test: if the other device reached “verified” quickly, keep this setting for when this device sends offline.</p>
+      <button type="button" className="btn block" data-testid="bench-use" onClick={() => void session.updateSettings({ qrStream: chosen })}>
+        Use {describeQrStream(chosen)} for my offline transfers
       </button>
     </div>
   );

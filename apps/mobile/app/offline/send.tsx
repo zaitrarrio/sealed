@@ -7,9 +7,9 @@
  * Both screens show the same safety code as soon as the receiver reads the first frames. The files can be
  * chosen before or after filming the key code.
  */
-import { TIERS, compress, ctEqual, prepareAirgapStream, type FacetSender, type ParsedCode, type Tier } from "@sealed/core";
+import { compress, ctEqual, describeQrStream, prepareAirgapStream, qrStreamSetting, type FacetSender, type QrStreamSetting, type ParsedCode } from "@sealed/core";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { FacetStream } from "../../src/components/FacetStream";
 import { FilePicker } from "../../src/components/FilePicker";
@@ -27,9 +27,9 @@ import { B, Button, Card, CheckCode, Notice, P, Row, Screen, Spinner, Title, err
 /** Above this, an optical transfer takes long enough that the UI warns before starting. */
 const LARGE_OPTICAL_BYTES = 2 * 1024 * 1024;
 
-function etaSeconds(bytes: number, tier: Tier): number {
-  const t = TIERS[tier];
-  return Math.ceil(bytes / (t.symbolSize * t.dataFps * 0.7));
+/** Streaming time at the saved QR setting, assuming 30 % of codes are missed. */
+function etaSeconds(bytes: number, qr: QrStreamSetting): number {
+  return Math.ceil(bytes / (qr.symbolSize * qr.codesPerScreen * (60 / qr.holdRefreshes60) * 0.7));
 }
 
 function formatDuration(s: number): string {
@@ -79,21 +79,22 @@ export default function SendOffline() {
     })();
   }, [rk]);
 
+  const qrStream = useMemo(() => qrStreamSetting(s.settings.qrStream), [s.settings.qrStream]);
+
   // Turn 2 starts by itself: as soon as there is a key and files, encrypt and stream.
   useEffect(() => {
     if (!rk || files.length === 0 || prepared || busy || error) return;
     setBusy(true);
     const signedBy = s.keys && s.active ? s.keys : undefined;
-    prepareAirgapStream({ files: toEnvelopeInputs(files), reverseKey: rk, ...(signedBy ? { senderKeys: signedBy } : {}), senderLabel: s.profile.label || "Sealed sender" })
+    prepareAirgapStream({ files: toEnvelopeInputs(files), reverseKey: rk, ...(signedBy ? { senderKeys: signedBy } : {}), senderLabel: s.profile.label || "Sealed sender", qr: qrStream })
       .then((p) => {
         setPrepared({ sender: p.sender, sas: p.sas });
         setStreaming(true);
       })
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setBusy(false));
-  }, [rk, files, prepared, busy, error, s.keys, s.active, s.profile.label]);
+  }, [rk, files, prepared, busy, error, s.keys, s.active, s.profile.label, qrStream]);
 
-  const tier = (rk ? Math.min(rk.tier, 3) : 0) as Tier;
   const bytes = totalSize(files);
   const step = !rk ? 1 : 2;
 
@@ -103,7 +104,7 @@ export default function SendOffline() {
         <Steps current={2} steps={["They show, you film", "Switch: you show, they film"]} />
         <Title eyebrow="Your turn to show">Turn your screen toward them</Title>
         <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testID="airgap-sender-sas" />
-        <FacetStream sender={prepared.sender} caption={`T${tier}`} onStop={() => setStreaming(false)} reduceMotion={s.settings.reduceMotion ?? false} />
+        <FacetStream sender={prepared.sender} codesPerScreen={qrStream.codesPerScreen} caption={describeQrStream(qrStream)} onStop={() => setStreaming(false)} reduceMotion={s.settings.reduceMotion ?? false} />
         <P tone="subtle">Keep streaming until their phone says the files arrived. If the safety codes differ, stop: the key code was not theirs.</P>
       </Screen>
     );
@@ -136,7 +137,7 @@ export default function SendOffline() {
           <B>{`Got their key: ${pinnedName ?? rk.label}`}</B>
           {files.length === 0 ? <P>Choose the files to send; streaming starts as soon as you do.</P> : null}
           {bytes > 0 ? (
-            <P tone="subtle">{`About ${formatDuration(etaSeconds(bytes, tier))} of streaming at T${tier}${bytes > LARGE_OPTICAL_BYTES ? ". That is long for an offline transfer; share online if a network is allowed" : ""}.`}</P>
+            <P tone="subtle">{`About ${formatDuration(etaSeconds(bytes, qrStream))} of streaming at ${describeQrStream(qrStream)}${bytes > LARGE_OPTICAL_BYTES ? ". That is long for an offline transfer; share online if a network is allowed" : ""}.`}</P>
           ) : null}
           {busy ? <Spinner label="Encrypting for their phone…" /> : null}
           {prepared && !streaming ? (

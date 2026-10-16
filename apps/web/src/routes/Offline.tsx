@@ -3,7 +3,7 @@
  * camera scans it, both show the Air-gap check code, and the sender's screen streams Facet frames that only the
  * receiver's device key can open. Broadcast (open): the sender loops the stream and anyone in view can decode it.
  */
-import { TIERS, compress, ctEqual, createReverseKeyOffer, fromB64url, prepareAirgapStream, prepareBroadcastStream, type FacetSender, type ParsedCode, type Tier } from "@sealed/core";
+import { compress, ctEqual, createReverseKeyOffer, describeQrStream, fromB64url, prepareAirgapStream, prepareBroadcastStream, qrStreamSetting, type FacetSender, type QrStreamSetting, type ParsedCode, type Tier } from "@sealed/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { FacetStream } from "../components/FacetStream";
@@ -28,9 +28,9 @@ import type { StoredDeviceKeys } from "../lib/webcrypto-keys";
 /** Above this, an optical transfer takes long enough that the UI warns before starting. */
 const LARGE_OPTICAL_BYTES = 2 * 1024 * 1024;
 
-function etaSeconds(bytes: number, tier: Tier): number {
-  const t = TIERS[tier];
-  return Math.ceil(bytes / (t.symbolSize * t.dataFps * 0.7));
+/** Streaming time at the saved QR setting, assuming 30 % of codes are missed. */
+function etaSeconds(bytes: number, qr: QrStreamSetting): number {
+  return Math.ceil(bytes / (qr.symbolSize * qr.codesPerScreen * (60 / qr.holdRefreshes60) * 0.7));
 }
 
 function formatDuration(s: number): string {
@@ -118,21 +118,22 @@ export function SendOfflinePage() {
     })();
   }, [rk]);
 
+  const qrStream = useMemo(() => qrStreamSetting(s.settings.qrStream), [s.settings.qrStream]);
+
   // Turn 2 starts by itself: as soon as there is a key and files, encrypt and start streaming.
   useEffect(() => {
     if (!rk || files.length === 0 || prepared || busy || error) return;
     setBusy(true);
     const signedBy = s.keys && s.active ? s.keys : undefined;
-    prepareAirgapStream({ files: toEnvelopeInputs(files), reverseKey: rk, ...(signedBy ? { senderKeys: signedBy } : {}), senderLabel: s.profile.label || "Sealed sender" })
+    prepareAirgapStream({ files: toEnvelopeInputs(files), reverseKey: rk, ...(signedBy ? { senderKeys: signedBy } : {}), senderLabel: s.profile.label || "Sealed sender", qr: qrStream })
       .then((p) => {
         setPrepared({ sender: p.sender, sas: p.sas });
         setConfirmed(true);
       })
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setBusy(false));
-  }, [rk, files, prepared, busy, error, s.keys, s.active, s.profile.label]);
+  }, [rk, files, prepared, busy, error, s.keys, s.active, s.profile.label, qrStream]);
 
-  const tier = (rk ? Math.min(rk.tier, 3) : 0) as Tier;
   const bytes = totalSize(files);
 
   if (prepared && confirmed) {
@@ -140,7 +141,7 @@ export function SendOfflinePage() {
       <div className="stack-lg">
         <Steps current={2} steps={["They show, you film", "Switch: you show, they film"]} />
         <CheckCode value={prepared.sas} label="Safety code — their screen shows the same" testId="airgap-sender-sas" />
-        <FacetStream sender={prepared.sender} caption={`T${tier}`} onStop={() => setConfirmed(false)} />
+        <FacetStream sender={prepared.sender} codesPerScreen={qrStream.codesPerScreen} caption={describeQrStream(qrStream)} onStop={() => setConfirmed(false)} />
       </div>
     );
   }
@@ -189,7 +190,7 @@ export function SendOfflinePage() {
           {files.length === 0 && <p className="muted" style={{ margin: 0 }}>Choose the files to send; streaming starts as soon as you do.</p>}
           {bytes > 0 && (
             <p className="subtle" style={{ margin: 0 }}>
-              About {formatDuration(etaSeconds(bytes, tier))} of streaming at T{tier}
+              About {formatDuration(etaSeconds(bytes, qrStream))} of streaming at {describeQrStream(qrStream)}
               {bytes > LARGE_OPTICAL_BYTES ? ". That is long for an offline transfer; share online if a network is allowed." : "."}
             </p>
           )}
@@ -342,8 +343,9 @@ export function BroadcastSendPage() {
   const [sender, setSender] = useState<FacetSender | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const qrStream = useMemo(() => qrStreamSetting(s.settings.qrStream), [s.settings.qrStream]);
 
-  if (sender) return <FacetStream sender={sender} caption="broadcast" onStop={() => setSender(null)} />;
+  if (sender) return <FacetStream sender={sender} codesPerScreen={qrStream.codesPerScreen} caption={`broadcast · ${describeQrStream(qrStream)}`} onStop={() => setSender(null)} />;
 
   return (
     <div className="stack-lg">
@@ -373,7 +375,7 @@ export function BroadcastSendPage() {
           setBusy(true);
           setError(null);
           const publisher = sign && s.keys && s.chain ? { signing: s.keys.signing, fingerprint: s.chain.fingerprint, label: s.profile.label } : undefined;
-          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 0 })
+          prepareBroadcastStream({ files: toEnvelopeInputs(files), ...(publisher ? { publisher } : {}), tier: 0, qr: qrStream })
             .then((r) => setSender(r.sender))
             .catch((e: unknown) => setError(errorMessage(e)))
             .finally(() => setBusy(false));

@@ -104,6 +104,37 @@ export function isT0SymbolSize(n: number): boolean {
 /** Frame rates a T0 stream may use, as display refreshes per frame at 60 Hz (6 = 10 frames/s … 2 = 30 frames/s). */
 export const QR_HOLDS = [6, 4, 3, 2] as const;
 
+/** How a sender draws a T0 stream: bytes per code, codes on screen and frame hold. Saved per device (ADR-0020). */
+export interface QrStreamSetting {
+  symbolSize: number;
+  codesPerScreen: 1 | 2 | 4;
+  holdRefreshes60: number;
+}
+
+/** Version 21, one code, 10 frames/s: what every pairing read reliably before profiles existed. */
+export const DEFAULT_QR_STREAM: Readonly<QrStreamSetting> = Object.freeze({ symbolSize: 840, codesPerScreen: 1, holdRefreshes60: 6 });
+
+/** Validates a stored setting, falling back field by field to the default (old or hand-edited storage). */
+export function qrStreamSetting(v: unknown): QrStreamSetting {
+  const o = (v && typeof v === "object" ? v : {}) as Partial<Record<keyof QrStreamSetting, unknown>>;
+  const size = typeof o.symbolSize === "number" && isT0SymbolSize(o.symbolSize) ? o.symbolSize : DEFAULT_QR_STREAM.symbolSize;
+  const codes = o.codesPerScreen === 2 || o.codesPerScreen === 4 ? o.codesPerScreen : 1;
+  const hold = typeof o.holdRefreshes60 === "number" && (QR_HOLDS as readonly number[]).includes(o.holdRefreshes60) ? o.holdRefreshes60 : DEFAULT_QR_STREAM.holdRefreshes60;
+  return { symbolSize: size, codesPerScreen: codes, holdRefreshes60: hold };
+}
+
+/** "v30 · 1,664 B × 2 at 20/s (≤ 65 KB/s)". */
+export function describeQrStream(s: QrStreamSetting): string {
+  const p = QR_PROFILES.find((q) => q.symbolSize === s.symbolSize);
+  const fps = 60 / s.holdRefreshes60;
+  const max = (s.symbolSize * s.codesPerScreen * fps) / 1024;
+  return `${p ? `v${p.qrVersion} · ` : ""}${s.symbolSize.toLocaleString("en-US")} B × ${s.codesPerScreen} at ${fps}/s (≤ ${max.toFixed(0)} KB/s)`;
+}
+
+export function isDefaultQrStream(s: QrStreamSetting): boolean {
+  return s.symbolSize === DEFAULT_QR_STREAM.symbolSize && s.codesPerScreen === DEFAULT_QR_STREAM.codesPerScreen && s.holdRefreshes60 === DEFAULT_QR_STREAM.holdRefreshes60;
+}
+
 /**
  * RaptorQ OTI for streaming `length` bytes at `tier` (Al = 8, N = 1). T0 streams may use a larger symbol size
  * (`symbolSize`, see QR_PROFILES); grid tiers always use their fixed size.
