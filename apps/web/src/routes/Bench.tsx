@@ -6,7 +6,7 @@
  * The filming side reads QR frames with the browser's BarcodeDetector when it has one (Chrome on Android and
  * macOS, Edge), otherwise it hands camera frames to Sealed's own decoder in a worker. The report says which.
  */
-import { BENCHMARK_SIZES, formatBenchmarkReport, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type Tier } from "@sealed/core";
+import { BENCHMARK_SIZES, QR_HOLDS, QR_PROFILES, formatBenchmarkReport, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type Tier } from "@sealed/core";
 import { useEffect, useRef, useState } from "react";
 import { FacetStream } from "../components/FacetStream";
 import { Notice, PageTitle, Progress, errorMessage } from "../components/ui";
@@ -43,11 +43,17 @@ export function BenchPage() {
 function ShowStream() {
   const [size, setSize] = useState<number>(BENCHMARK_SIZES[1]);
   const [tier, setTier] = useState<Tier>(0);
+  const [qrSize, setQrSize] = useState<number>(QR_PROFILES[0].symbolSize);
+  const [codes, setCodes] = useState(1);
+  const [hold, setHold] = useState<number>(6);
   const [stream, setStream] = useState<BenchmarkStream | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (stream) return <FacetStream sender={stream.sender} caption={`bench T${stream.tier} · ${formatBytes(stream.size)} · seed ${stream.seed}`} onStop={() => setStream(null)} />;
+  if (stream) {
+    const profile = stream.tier === 0 ? `QR ${stream.qr.symbolSize} B × ${codes} at ${60 / stream.qr.holdRefreshes60}/s` : `T${stream.tier}`;
+    return <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? codes : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} />;
+  }
 
   return (
     <div className="stack">
@@ -70,7 +76,43 @@ function ShowStream() {
           <option value={3}>T3 — colour grid (experimental)</option>
         </select>
       </label>
-      {tier !== 0 && <Notice>Grid streams are decoded in JavaScript on the filming side, a frame or two per second at best.</Notice>}
+      {tier === 0 ? (
+        <>
+          <label className="field">
+            QR size
+            <select value={qrSize} onChange={(e) => setQrSize(Number(e.target.value))} data-testid="bench-qr-size">
+              {QR_PROFILES.map((p) => (
+                <option key={p.symbolSize} value={p.symbolSize}>
+                  Version {p.qrVersion} — {p.symbolSize} bytes per code
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Codes on screen
+            <select value={codes} onChange={(e) => setCodes(Number(e.target.value))} data-testid="bench-codes">
+              {[1, 2, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Frames per second (60 Hz screen)
+            <select value={hold} onChange={(e) => setHold(Number(e.target.value))} data-testid="bench-fps">
+              {QR_HOLDS.map((h) => (
+                <option key={h} value={h}>
+                  {60 / h} per second
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="subtle">Sends at most {((qrSize * codes * (60 / hold)) / 1024).toFixed(0)} KB/s; the filming device shows how much it actually reads.</p>
+        </>
+      ) : (
+        <Notice>Grid streams are decoded in JavaScript on the filming side, a frame or two per second at best.</Notice>
+      )}
       {error && <Notice tone="danger">{error}</Notice>}
       <button
         type="button"
@@ -80,7 +122,7 @@ function ShowStream() {
         onClick={() => {
           setBusy(true);
           setError(null);
-          prepareBenchmarkStream({ size, tier })
+          prepareBenchmarkStream({ size, tier, ...(tier === 0 ? { qr: { symbolSize: qrSize, holdRefreshes60: hold } } : {}) })
             .then(setStream)
             .catch((e: unknown) => setError(errorMessage(e)))
             .finally(() => setBusy(false));

@@ -10,7 +10,7 @@
 import { sha256 } from "../crypto/primitives";
 import { ctEqual } from "../bytes";
 import { FacetReceiver } from "./receiver";
-import { openOpticalEnvelope, prepareBroadcastStream } from "./optical";
+import { openOpticalEnvelope, prepareBroadcastStream, type QrStreamOptions } from "./optical";
 import type { FacetSender } from "./sender";
 import { TIERS } from "./tiers";
 import type { RgbaImage, Tier } from "./types";
@@ -47,17 +47,21 @@ export interface BenchmarkStream {
   seed: number;
   size: number;
   tier: Tier;
+  /** T0 only: bytes per QR code and display refreshes per frame at 60 Hz. */
+  qr: { symbolSize: number; holdRefreshes60: number };
 }
 
 /** The sender side: a looping Broadcast stream of benchmark bytes. Incompressible, so size = bytes on screen. */
-export async function prepareBenchmarkStream(o: { size: number; tier: Tier; seed?: number }): Promise<BenchmarkStream> {
+export async function prepareBenchmarkStream(o: { size: number; tier: Tier; seed?: number; qr?: QrStreamOptions }): Promise<BenchmarkStream> {
   const seed = (o.seed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0;
   const data = benchmarkPayload(seed, o.size);
+  const qr = { symbolSize: o.qr?.symbolSize ?? TIERS[0].symbolSize, holdRefreshes60: o.qr?.holdRefreshes60 ?? TIERS[0].holdRefreshes60 };
   const { sender } = await prepareBroadcastStream({
     files: [{ path: benchmarkFileName(seed, o.size), mediaType: "application/octet-stream", size: o.size, data }],
     tier: o.tier,
+    ...(o.tier === 0 ? { qr } : {}),
   });
-  return { sender, seed, size: o.size, tier: o.tier };
+  return { sender, seed, size: o.size, tier: o.tier, qr };
 }
 
 /** Where the run got to; the first stage that did not happen is where to look. */
@@ -68,6 +72,8 @@ export interface BenchmarkReport {
   /** Human summary of the stage, for the UI. */
   verdict: string;
   tier: Tier | null;
+  /** Bytes per frame (per QR code for T0) of the stream received. */
+  symbolSize: number | null;
   payloadBytes: number | null;
   /** Capture inputs given to the meter: camera frames (image path) or detector reads (code path). */
   inputs: number;
@@ -159,7 +165,7 @@ export class BenchmarkMeter {
     const secs = elapsed / 1000;
     const tier = p.tier;
     // Before the manifest is opened, estimate payload from the symbols the stream needs.
-    const symbolSize = tier !== null ? TIERS[tier].symbolSize : 0;
+    const symbolSize = p.symbolSize ?? (tier !== null ? TIERS[tier].symbolSize : 0);
     const bytes = this.payloadBytes ?? (p.symbolsNeeded ? p.symbolsNeeded * symbolSize : 0);
     const activeSecs = this.firstValidAt === null ? 0 : (t - this.firstValidAt) / 1000;
     const goodput = activeSecs > 0 ? (bytes * Math.min(1, p.fraction)) / activeSecs : 0;
@@ -180,6 +186,7 @@ export class BenchmarkMeter {
       stage,
       verdict: verdictFor(stage, this.error),
       tier,
+      symbolSize: p.symbolSize,
       payloadBytes: this.payloadBytes,
       inputs: this.inputs,
       validFrames: p.framesDecoded,
@@ -221,7 +228,7 @@ export function formatBenchmarkReport(r: BenchmarkReport): string {
   const lines = [
     `Sealed optical benchmark — ${r.stage}`,
     r.verdict,
-    `tier            T${r.tier ?? "?"}`,
+    `tier            T${r.tier ?? "?"}${r.symbolSize ? ` · ${r.symbolSize} B per ${r.tier === 0 ? "code" : "frame"}` : ""}`,
     `payload         ${r.payloadBytes !== null ? kb(r.payloadBytes) : "unknown yet"}`,
     `elapsed         ${(r.elapsedMs / 1000).toFixed(1)} s`,
     `first frame     ${r.timeToFirstFrameMs !== null ? `${(r.timeToFirstFrameMs / 1000).toFixed(1)} s` : "none"}`,

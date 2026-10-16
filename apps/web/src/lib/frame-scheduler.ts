@@ -109,3 +109,36 @@ export function streamSizePx(cssWidth: number, cssHeight: number, dpr: number, m
   const side = Math.max(0, Math.min(cssWidth, cssHeight) - marginCss * 2);
   return Math.floor(side * Math.max(1, dpr));
 }
+
+export interface CodeSlot {
+  x: number;
+  y: number;
+  side: number;
+}
+
+/**
+ * Places `n` square codes in a `width` × `height` area with `gap` between them, choosing the column count that
+ * makes each code largest (2 codes stack in portrait and sit side by side in landscape; 4 make a 2 × 2 grid).
+ * The block is centred. Codes carry their own quiet zone, so a small gap is enough.
+ */
+export function layoutCodes(n: number, width: number, height: number, gap = 8): CodeSlot[] {
+  if (n < 1 || width <= 0 || height <= 0) return [];
+  let best = { cols: 1, rows: n, side: 0 };
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const side = Math.floor(Math.min((width - gap * (cols - 1)) / cols, (height - gap * (rows - 1)) / rows));
+    if (side > best.side) best = { cols, rows, side };
+  }
+  const { cols, rows, side } = best;
+  const blockW = cols * side + gap * (cols - 1);
+  const blockH = rows * side + gap * (rows - 1);
+  const x0 = Math.floor((width - blockW) / 2);
+  const y0 = Math.floor((height - blockH) / 2);
+  const out: CodeSlot[] = [];
+  for (let i = 0; i < n; i++) {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    out.push({ x: x0 + c * (side + gap), y: y0 + r * (side + gap), side });
+  }
+  return out;
+}

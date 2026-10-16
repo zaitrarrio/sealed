@@ -79,8 +79,38 @@ export function chooseTier(m: CapabilityMeasurement): Tier {
   return 0;
 }
 
-/** RaptorQ OTI for streaming `length` bytes at `tier` (Al = 8, N = 1). */
-export function planStreamOti(length: number, tier: Tier): Oti {
+/**
+ * QR sizes for T0 streams (ADR-0019). Each frame is one QR code, error correction L, holding the 12-byte header
+ * and a symbol of `symbolSize` bytes as Base45 text; the symbol size is the largest multiple of 8 that fits the
+ * version's alphanumeric capacity. Larger versions carry more per frame but need a sharper, closer view. The
+ * receiver learns the size from the stream descriptor, so any of these interoperates.
+ */
+export const QR_PROFILES = [
+  { qrVersion: 21, symbolSize: 840 },
+  { qrVersion: 25, symbolSize: 1216 },
+  { qrVersion: 30, symbolSize: 1664 },
+  { qrVersion: 35, symbolSize: 2216 },
+  { qrVersion: 40, symbolSize: 2848 },
+] as const;
+
+export const T0_MIN_SYMBOL = 64;
+export const T0_MAX_SYMBOL = 2848;
+
+/** Symbol sizes a T0 stream may use: multiples of 8 (RaptorQ Al) from 64 to 2848 bytes. */
+export function isT0SymbolSize(n: number): boolean {
+  return Number.isInteger(n) && n >= T0_MIN_SYMBOL && n <= T0_MAX_SYMBOL && n % 8 === 0;
+}
+
+/** Frame rates a T0 stream may use, as display refreshes per frame at 60 Hz (6 = 10 frames/s … 2 = 30 frames/s). */
+export const QR_HOLDS = [6, 4, 3, 2] as const;
+
+/**
+ * RaptorQ OTI for streaming `length` bytes at `tier` (Al = 8, N = 1). T0 streams may use a larger symbol size
+ * (`symbolSize`, see QR_PROFILES); grid tiers always use their fixed size.
+ */
+export function planStreamOti(length: number, tier: Tier, symbolSize?: number): Oti {
   const spec = TIERS[tier];
-  return planOti(length, spec.symbolSize, spec.maxSourceSymbolsPerBlock, 8);
+  const t = tier === 0 && symbolSize !== undefined ? symbolSize : spec.symbolSize;
+  if (tier === 0 && !isT0SymbolSize(t)) throw new RangeError(`invalid T0 symbol size ${t}`);
+  return planOti(length, t, spec.maxSourceSymbolsPerBlock, 8);
 }

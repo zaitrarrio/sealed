@@ -13,7 +13,7 @@
 import { RaptorQDecoder, decodeOti } from "../fec/index";
 import { ctEqual } from "../bytes";
 import type { CapabilityMeasurement, ReceiveProgress, RgbaImage, StreamDescriptor, Tier } from "./types";
-import { TIERS, type GridTier } from "./tiers";
+import { TIERS, isT0SymbolSize, type GridTier } from "./tiers";
 import { GridDetector, gridHomography, gridSizesFor, pixelsPerCell, type LumaPlane } from "./detect";
 import { anchorPoints, refineHomography } from "./refine";
 import { gridLayout, gridTierForSize } from "./layout";
@@ -35,6 +35,8 @@ export interface FacetReceiverOptions {
 interface TierState {
   descriptor: StreamDescriptor | null;
   decoder: RaptorQDecoder | null;
+  /** Symbol size of this stream (from its descriptor's OTI). */
+  symbolSize: number | null;
   pending: { sbn: number; esi: number; symbol: Uint8Array }[];
   seen: Set<string>;
 }
@@ -66,6 +68,7 @@ function emptyProgress(): ReceiveProgress {
     blocksComplete: 0,
     blockCount: 0,
     fraction: 0,
+    symbolSize: null,
     calibrated: false,
     complete: false,
   };
@@ -200,7 +203,7 @@ export class FacetReceiver {
     const header = bytes.subarray(0, HEADER_BYTES);
     const payload = bytes.subarray(HEADER_BYTES);
     const h = parseFrameHeader(header);
-    if (!h || h.tier !== 0 || payload.length !== TIERS[0].symbolSize) return false;
+    if (!h || h.tier !== 0 || !isT0SymbolSize(payload.length)) return false;
     if (!headerCrcMatches(header, payload)) return false;
     return this.accept(h, payload);
   }
@@ -334,7 +337,7 @@ export class FacetReceiver {
   private tierState(tier: Tier): TierState {
     let st = this.tiers.get(tier);
     if (!st) {
-      st = { descriptor: null, decoder: null, pending: [], seen: new Set() };
+      st = { descriptor: null, decoder: null, symbolSize: null, pending: [], seen: new Set() };
       this.tiers.set(tier, st);
     }
     return st;
@@ -346,18 +349,24 @@ export class FacetReceiver {
     if (h.type === "calibration") return false;
     this.lockStream(h.streamId);
     const st = this.tierState(h.tier);
+    // A data frame whose size disagrees with this stream's descriptor is not part of it.
+    if (h.type === "data" && st.symbolSize !== null && payload.length !== st.symbolSize) return false;
     this.framesDecoded++;
     if (h.type === "descriptor" || h.type === "end") {
       if (st.descriptor) return true;
       const d = decodeDescriptorPayload(payload);
       if (!d || !ctEqual(d.streamId, h.streamId) || d.tier !== h.tier) return false;
       const oti = decodeOti(d.oti);
-      if (oti.symbolSize !== TIERS[h.tier].symbolSize) return false;
+      // Grid tiers have a fixed symbol size; a T0 stream names its own (QR_PROFILES), and the descriptor frame
+      // itself is padded to exactly that size.
+      const sizeOk = h.tier === 0 ? isT0SymbolSize(oti.symbolSize) && payload.length === oti.symbolSize : oti.symbolSize === TIERS[h.tier].symbolSize;
+      if (!sizeOk) return false;
       st.descriptor = d;
       st.decoder = new RaptorQDecoder(oti);
+      st.symbolSize = oti.symbolSize;
       const pend = st.pending;
       st.pending = [];
-      for (const p of pend) this.addSymbol(h.tier, st, p.sbn, p.esi, p.symbol);
+      for (const p of pend) if (p.symbol.length === oti.symbolSize) this.addSymbol(h.tier, st, p.sbn, p.esi, p.symbol);
       return true;
     }
     // data
@@ -405,6 +414,7 @@ export class FacetReceiver {
     if (best) {
       const dec = best.dec;
       p.tier = best.tier;
+      p.symbolSize = this.tiers.get(best.tier)?.symbolSize ?? null;
       p.blockCount = dec.blockCount;
       for (let b = 0; b < dec.blockCount; b++) {
         const k = dec.sourceSymbolCount(b);

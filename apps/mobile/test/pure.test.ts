@@ -105,3 +105,19 @@ describe("trusted code origins", () => {
     expect(() => trustableOrigin("not a url")).toThrow();
   });
 });
+
+describe("code layout", () => {
+  it("stacks two codes in portrait, places them side by side in landscape, and makes a 2 × 2 grid of four", async () => {
+    const { layoutCodes } = await import("../src/lib/frame-scheduler");
+    const portrait = layoutCodes(2, 400, 800, 8);
+    expect(portrait.map((s) => s.x)).toEqual([2, 2]); // 396-wide codes centred in 400
+    expect(portrait[1]!.y).toBe(portrait[0]!.y + portrait[0]!.side + 8);
+    expect(portrait[0]!.side).toBe(396);
+    const landscape = layoutCodes(2, 800, 400, 8);
+    expect(landscape[0]!.y).toBe(landscape[1]!.y);
+    const four = layoutCodes(4, 800, 800, 8);
+    expect(new Set(four.map((s) => s.x)).size).toBe(2);
+    expect(new Set(four.map((s) => s.y)).size).toBe(2);
+    expect(layoutCodes(1, 300, 500)[0]).toEqual({ x: 0, y: 100, side: 300 });
+  });
+});

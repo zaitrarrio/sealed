@@ -21,7 +21,7 @@ import { encodeFrameHeader } from "./header";
 import { encodeDescriptorPayload } from "./descriptor";
 import { calibrationPicture, dataPicture, gridLayout } from "./grid";
 import { renderPicture } from "./render";
-import { qrFrameText, renderQrFrame } from "./qr";
+import { qrFrameText, qrMatrix, renderQrFrame } from "./qr";
 import { isGridTier } from "./layout";
 import { Xorshift32, seedFrom } from "./random";
 
@@ -51,6 +51,11 @@ export interface FacetSenderOptions {
    * sub-stream has a different OTI (T = 840), so it needs its own signature over that OTI (`planStreamOti(envelope.length, 0)`).
    */
   compatibleSignature?: Uint8Array;
+  /**
+   * T0 stream shape (ADR-0019): bytes per QR code (a QR_PROFILES size; default 840) and display refreshes per
+   * frame at 60 Hz (default 6 = 10 frames/s). Applies to a T0 primary stream and to the interleaved T0 stream.
+   */
+  qr?: { symbolSize?: number; holdRefreshes60?: number };
 }
 
 /** A frame with everything needed to render it. */
@@ -143,6 +148,8 @@ class TierStream {
   private dataSent = 0;
   private endSent = false;
   private descriptorPayload: Uint8Array;
+  private readonly symbolSize: number;
+  private readonly hold: number;
 
   constructor(
     readonly tier: Tier,
@@ -151,8 +158,12 @@ class TierStream {
     base: FacetSenderOptions["descriptor"],
     private readonly loop: boolean,
     repairFraction: number,
+    qr: FacetSenderOptions["qr"] = {},
   ) {
-    this.oti = planStreamOti(envelope.length, tier);
+    this.symbolSize = tier === 0 ? (qr.symbolSize ?? TIERS[0].symbolSize) : TIERS[tier].symbolSize;
+    this.hold = tier === 0 ? (qr.holdRefreshes60 ?? TIERS[0].holdRefreshes60) : TIERS[tier].holdRefreshes60;
+    if (!Number.isInteger(this.hold) || this.hold < 1 || this.hold > 60) throw new RangeError(`invalid frame hold ${this.hold}`);
+    this.oti = planStreamOti(envelope.length, tier, this.symbolSize);
     this.enc = new RaptorQEncoder(envelope, this.oti);
     this.schedule = new SymbolSchedule(this.enc, loop, repairFraction);
     const d: StreamDescriptor = { streamId, tier, oti: encodeOti(this.oti) };
@@ -166,7 +177,7 @@ class TierStream {
     if (base.manifestPart) d.manifestPart = base.manifestPart;
     if (base.senderLabel !== undefined) d.senderLabel = base.senderLabel;
     this.descriptor = d;
-    this.descriptorPayload = encodeDescriptorPayload(d, TIERS[tier].symbolSize);
+    this.descriptorPayload = encodeDescriptorPayload(d, this.symbolSize);
   }
 
   get signed(): boolean {
@@ -213,7 +224,7 @@ class TierStream {
       payload = new Uint8Array(0);
     }
     const header = encodeFrameHeader({ tier: this.tier, type, loop: this.loop, signed: this.signed, streamId: this.streamId, sbn, esi }, payload);
-    const hold = TIERS[this.tier].holdRefreshes60;
+    const hold = this.hold;
     return { tier: this.tier, type, holdRefreshes: hold, sequence, header, payload, sbn, esi, streamId: this.streamId };
   }
 }
@@ -239,14 +250,14 @@ export class FacetSender {
     // Spec §7.5: after the source symbols, repair symbols continue indefinitely until the user stops the stream.
     // A finite budget is opt-in (fixtures, recordings).
     const repairFraction = opts.repairFraction ?? Number.POSITIVE_INFINITY;
-    this.primary = new TierStream(opts.tier, opts.envelope, this.streamId, opts.descriptor, loop, repairFraction);
+    this.primary = new TierStream(opts.tier, opts.envelope, this.streamId, opts.descriptor, loop, repairFraction, opts.qr);
     this.descriptor = this.primary.descriptor;
     if (opts.interleaveCompatible && opts.tier !== 0) {
       const base = { ...opts.descriptor };
       if (opts.compatibleSignature) base.signature = opts.compatibleSignature;
       else delete base.signature;
       // The manifest part rarely fits an 840-byte T0 descriptor; TierStream drops it when it does not.
-      this.compatible = new TierStream(0, opts.envelope, this.streamId, base, loop, repairFraction);
+      this.compatible = new TierStream(0, opts.envelope, this.streamId, base, loop, repairFraction, opts.qr);
     } else {
       this.compatible = null;
     }
@@ -274,7 +285,7 @@ export class FacetSender {
     const f = stream.next(seq);
     // Keep only a short history for render(); UIs render a frame right after next().
     this.frames.set(seq, f);
-    if (this.frames.size > 8) {
+    if (this.frames.size > 16) {
       const oldest = this.frames.keys().next().value;
       if (oldest !== undefined) this.frames.delete(oldest);
     }
@@ -289,6 +300,16 @@ export class FacetSender {
     const f = this.frames.get(frame.sequence);
     if (!f) throw new RangeError(`frame ${frame.sequence} is no longer available; use frames right after next()`);
     return f.tier === 0 ? qrFrameText(f.header, f.payload) : null;
+  }
+
+  /**
+   * The QR module matrix of a T0 frame returned by a recent `next()` call (null for grid frames), for UIs that
+   * draw codes as vectors (no RGBA rasterization in JavaScript).
+   */
+  qrModules(frame: FacetFrame): { size: number; modules: Uint8Array } | null {
+    const f = this.frames.get(frame.sequence);
+    if (!f) throw new RangeError(`frame ${frame.sequence} is no longer available; use frames right after next()`);
+    return f.tier === 0 ? qrMatrix(f.header, f.payload) : null;
   }
 
   /** Renders a frame returned by a recent `next()` call as a square RGBA image. */

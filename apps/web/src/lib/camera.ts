@@ -126,13 +126,14 @@ export function qrDetector(): Promise<BarcodeDetectorLike | null> {
 
 /**
  * Reads every QR code the camera sees with the browser's detector, once per video frame (skipping frames while
- * a detection is still running). Calls `onCode` for each code that differs from the previous one. Returns a stop
+ * a detection is still running). Calls `onCode` once for each code while it stays in view (several may be). Returns a stop
  * function. Use only when `qrDetector()` resolved to a detector.
  */
 export function watchQrCodes(video: HTMLVideoElement, detector: BarcodeDetectorLike, onCode: (text: string, timestampMs: number) => void, dedupe = true): () => void {
   let stopped = false;
   let busy = false;
-  let last = "";
+  // Several codes may be in view at once; remember the recent ones so each is reported once while visible.
+  const recent: string[] = [];
   let handle = 0;
   const run = (t: number) => {
     if (stopped || busy || video.readyState < 2) return;
@@ -141,8 +142,9 @@ export function watchQrCodes(video: HTMLVideoElement, detector: BarcodeDetectorL
       .detect(video)
       .then((codes) => {
         for (const c of codes) {
-          if (!c.rawValue || (dedupe && c.rawValue === last)) continue;
-          last = c.rawValue;
+          if (!c.rawValue || (dedupe && recent.includes(c.rawValue))) continue;
+          recent.push(c.rawValue);
+          if (recent.length > 16) recent.shift();
           onCode(c.rawValue, t);
         }
       })

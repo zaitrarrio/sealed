@@ -98,6 +98,20 @@ test("Benchmark: filming a test stream reports progress and verifies the bytes",
   await context.close();
 });
 
+test("Benchmark at QR version 30: larger codes decode through the camera path and report their size", async () => {
+  const context = await browser.newContext({ baseURL: APP, permissions: ["camera"] });
+  const page = await context.newPage();
+  page.on("pageerror", (e) => console.error("pageerror:", e.message));
+  const { sender } = await prepareBenchmarkStream({ size: 32 * 1024, tier: 0, seed: 78, qr: { symbolSize: 1664 } });
+  writeFacetY4m(video, sender, { width: W, height: H, codePx: 720, frames: 200, fps: 10 });
+  await page.goto("/bench");
+  await page.getByTestId("bench-film").click();
+  const report = page.getByTestId("bench-report");
+  await expect(report).toHaveAttribute("data-stage", "verified", { timeout: 120_000 });
+  await expect(report).toContainText("1664 B per code");
+  await context.close();
+});
+
 test("Air-gap send: the app scans a reverse key code, shows the check code and streams frames a receiver decodes", async () => {
   const context = await browser.newContext({ baseURL: APP, acceptDownloads: true, viewport: { width: 1280, height: 720 }, reducedMotion: "no-preference" });
   const page = await context.newPage();

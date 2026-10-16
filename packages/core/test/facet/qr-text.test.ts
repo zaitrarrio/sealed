@@ -57,7 +57,7 @@ describe("T0 frames as text", () => {
     expect(qrFrameBytes(frame)).toEqual(frame);
     expect(qrFrameBytes(Uint8Array.from(text, (c) => c.charCodeAt(0)))).toEqual(frame);
     expect(qrFrameBytes("https://sealed.to/k#abc")).toBeNull();
-    expect(qrFrameBytes(randomBytes(100))).toBeNull();
+    expect(qrFrameBytes(randomBytes(101))).toBeNull(); // 89-byte symbol: not a multiple of 8
   });
 });
 

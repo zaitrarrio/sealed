@@ -15,44 +15,55 @@ import jsQR from "jsqr";
 import type { RgbaImage } from "./types";
 import { HEADER_BYTES } from "./header";
 import { renderQrMatrix } from "./render";
-import { TIERS } from "./tiers";
+import { T0_MAX_SYMBOL, TIERS, isT0SymbolSize } from "./tiers";
 import { gaussianBlur } from "./glyphs";
 import { base45Decode, base45Encode } from "./base45";
 
-/** QR version of a T0 frame: v21-L holds 1352 alphanumeric characters; a frame is 1278. */
+/** QR version of a default (840-byte) T0 frame: v21-L holds 1352 alphanumeric characters; a frame is 1278. */
 export const QR_VERSION = 21;
-/** Bytes carried by every T0 frame. */
+/** Bytes carried by a default T0 frame. Larger QR profiles (QR_PROFILES) carry more. */
 export const QR_FRAME_BYTES = HEADER_BYTES + TIERS[0].symbolSize;
+
+function isFrameLength(n: number): boolean {
+  return isT0SymbolSize(n - HEADER_BYTES);
+}
 
 /** The text content of one T0 frame (what a QR reader returns): Base45 of header ∥ payload. */
 export function qrFrameText(header: Uint8Array, payload: Uint8Array): string {
   if (header.length !== HEADER_BYTES) throw new RangeError("header must be 12 bytes");
-  if (payload.length > TIERS[0].symbolSize) throw new RangeError(`T0 payload exceeds ${TIERS[0].symbolSize} bytes`);
-  const bytes = new Uint8Array(QR_FRAME_BYTES);
+  if (payload.length > T0_MAX_SYMBOL) throw new RangeError(`T0 payload exceeds ${T0_MAX_SYMBOL} bytes`);
+  const bytes = new Uint8Array(HEADER_BYTES + payload.length);
   bytes.set(header, 0);
   bytes.set(payload, HEADER_BYTES);
   return base45Encode(bytes);
 }
 
 /**
- * Frame bytes from what a QR reader returned: Base45 text (current senders) or the raw 852 bytes of a byte-mode
- * frame (earlier senders, readers that return bytes). Null if it is neither.
+ * Frame bytes from what a QR reader returned: Base45 text (current senders) or the raw bytes of a byte-mode frame
+ * (earlier senders, readers that return bytes). Any T0 symbol size is accepted (QR_PROFILES); the header CRC is
+ * checked later. Null if it is neither.
  */
 export function qrFrameBytes(content: string | Uint8Array): Uint8Array | null {
   if (typeof content === "string") {
     const fromText = base45Decode(content);
-    if (fromText && fromText.length === QR_FRAME_BYTES) return fromText;
-    return null;
+    return fromText && isFrameLength(fromText.length) ? fromText : null;
   }
-  if (content.length === QR_FRAME_BYTES) return content;
   // A byte array that is really ASCII Base45 (some readers expose text as its bytes).
-  if (content.length > QR_FRAME_BYTES && content.every((b) => b < 128)) return qrFrameBytes(String.fromCharCode(...content));
-  return null;
+  if (content.length > QR_FRAME_BYTES && content.every((b) => b < 128)) {
+    const fromText = qrFrameBytes(String.fromCharCode(...content));
+    if (fromText) return fromText;
+  }
+  return isFrameLength(content.length) ? content : null;
 }
 
-/** QR module matrix for one T0 frame. */
+/**
+ * QR module matrix for one T0 frame, in the smallest version (error correction L) that holds it. The mask is
+ * fixed (pattern 0) instead of chosen by penalty score: the payload is ciphertext or RaptorQ symbols, which look
+ * random, so the choice barely affects readability, and skipping the eight-way search makes encoding about 5×
+ * faster — what lets a phone draw several codes per frame at 20–30 frames per second.
+ */
 export function qrMatrix(header: Uint8Array, payload: Uint8Array): { size: number; modules: Uint8Array } {
-  const sym = QRCodeCore.create([{ data: qrFrameText(header, payload), mode: "alphanumeric" }], { errorCorrectionLevel: "L", version: QR_VERSION });
+  const sym = QRCodeCore.create([{ data: qrFrameText(header, payload), mode: "alphanumeric" }], { errorCorrectionLevel: "L", maskPattern: 0 });
   return { size: sym.modules.size, modules: Uint8Array.from(sym.modules.data) };
 }
 

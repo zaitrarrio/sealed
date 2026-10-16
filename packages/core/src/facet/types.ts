@@ -68,6 +68,8 @@ export interface ReceiveProgress {
   blockCount: number;
   /** 0–1 estimate of completion. */
   fraction: number;
+  /** Bytes per symbol of the stream being decoded, once its descriptor is known. */
+  symbolSize: number | null;
   calibrated: boolean;
   complete: boolean;
 }

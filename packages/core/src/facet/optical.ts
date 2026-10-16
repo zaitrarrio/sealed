@@ -56,6 +56,12 @@ export function manifestPartOf(envelope: Uint8Array): Uint8Array {
   return envelope.subarray(0, end);
 }
 
+/** Shape of a T0 stream: bytes per QR code (a QR_PROFILES size) and display refreshes per frame at 60 Hz. */
+export interface QrStreamOptions {
+  symbolSize?: number;
+  holdRefreshes60?: number;
+}
+
 /** Sender steps 2–3 (§6.5). */
 export async function prepareAirgapStream(o: {
   files: readonly EnvelopeInput[];
@@ -63,6 +69,8 @@ export async function prepareAirgapStream(o: {
   senderKeys?: DeviceKeys;
   senderLabel: string;
   tier?: Tier;
+  /** T0 stream shape: bytes per QR code and frame hold (ADR-0019). */
+  qr?: QrStreamOptions;
 }): Promise<{ sender: FacetSender; sas: string; transferId: Uint8Array }> {
   const rk = o.reverseKey;
   const requested = o.tier ?? (isTier(rk.tier) ? rk.tier : DEFAULT_AIRGAP_TIER);
@@ -87,6 +95,7 @@ export async function prepareAirgapStream(o: {
     tier,
     streamId,
     descriptor: { senderPublicKey: senderAgreement.publicKey, wrap, manifestPart, senderLabel: o.senderLabel },
+    ...(o.qr ? { qr: o.qr } : {}),
   });
   const sas = airgapSas(rk.nonce, streamId, rk.receiverPublicKey, senderAgreement.publicKey);
   return { sender, sas, transferId };
@@ -116,6 +125,8 @@ export async function prepareBroadcastStream(o: {
   publisher?: BroadcastPublisher;
   tier?: Tier;
   interleaveCompatible?: boolean;
+  /** T0 stream shape: bytes per QR code and frame hold (ADR-0019). */
+  qr?: QrStreamOptions;
 }): Promise<{ sender: FacetSender; transferId: Uint8Array }> {
   const tier = o.tier ?? DEFAULT_BROADCAST_TIER;
   if (!isTier(tier)) throw new RangeError(`invalid tier ${String(tier)}`);
@@ -136,9 +147,11 @@ export async function prepareBroadcastStream(o: {
   if (o.publisher) {
     descriptor.publisherFingerprint = o.publisher.fingerprint;
     descriptor.publisherSigningKey = o.publisher.signing.publicKey;
-    descriptor.signature = await signObject(o.publisher.signing, "broadcast", broadcastObject(streamId, encodeOti(planStreamOti(bytes.length, tier)), manifestDigest));
+    // The signature binds the OTI, which includes the symbol size, so it is computed with the same QR size.
+    const t0Size = o.qr?.symbolSize;
+    descriptor.signature = await signObject(o.publisher.signing, "broadcast", broadcastObject(streamId, encodeOti(planStreamOti(bytes.length, tier, tier === 0 ? t0Size : undefined)), manifestDigest));
     if (o.interleaveCompatible && tier !== 0) {
-      compatibleSignature = await signObject(o.publisher.signing, "broadcast", broadcastObject(streamId, encodeOti(planStreamOti(bytes.length, 0)), manifestDigest));
+      compatibleSignature = await signObject(o.publisher.signing, "broadcast", broadcastObject(streamId, encodeOti(planStreamOti(bytes.length, 0, t0Size)), manifestDigest));
     }
   }
   const sender = new FacetSender({
@@ -149,6 +162,7 @@ export async function prepareBroadcastStream(o: {
     loop: true,
     interleaveCompatible: o.interleaveCompatible === true,
     ...(compatibleSignature ? { compatibleSignature } : {}),
+    ...(o.qr ? { qr: o.qr } : {}),
   });
   return { sender, transferId };
 }
