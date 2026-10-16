@@ -13,6 +13,8 @@
     "tunnel": "node tools/relay-tunnel.mjs",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "bench": "pnpm --filter @sealed/core bench",
+    "bench:sweep": "pnpm --filter @sealed/core bench:sweep",
     "build": "turbo build",
     "eas-build-post-install": "pnpm --filter @sealed/mobile run eas-build-post-install"
   },
