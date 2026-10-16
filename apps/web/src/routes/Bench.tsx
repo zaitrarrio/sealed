@@ -12,7 +12,7 @@ import { FacetStream } from "../components/FacetStream";
 import { Notice, PageTitle, Progress, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
 import { session, useSession } from "../lib/session";
-import { CameraError, feedFrames, openCamera, qrDetector, stopStream, watchQrCodes } from "../lib/camera";
+import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, stopStream, watchQrCodes } from "../lib/camera";
 import type { FromBenchWorker, ToBenchWorker } from "../workers/bench.worker";
 
 type Role = "film" | "show";
@@ -177,6 +177,7 @@ function FilmStream() {
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<BenchmarkReport | null>(null);
   const [reader, setReader] = useState<"detector" | "frames" | null>(null);
+  const [camera, setCamera] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -186,8 +187,15 @@ function FilmStream() {
     let stream: MediaStream | null = null;
     let stop: (() => void) | null = null;
     let cancelled = false;
+    let lockedOnce = false;
     worker.onmessage = (ev: MessageEvent<FromBenchWorker>) => {
       setReport(ev.data.report);
+      // Aimed: lock focus, exposure and white balance on the screen (ADR-0021).
+      if (!lockedOnce && ev.data.report.validFrames > 0 && stream) {
+        lockedOnce = true;
+        const track = stream.getVideoTracks()[0];
+        if (track) void lockCameraSettings(track).then((l) => setCamera((c) => `${c} · locked ${l.join(", ") || "nothing"}`));
+      }
       if (ev.data.report.stage === "verified" || ev.data.report.stage === "failed") setRunning(false);
     };
     worker.postMessage({ type: "start" } satisfies ToBenchWorker);
@@ -199,6 +207,8 @@ function FilmStream() {
         if (!video) return;
         video.srcObject = stream;
         await video.play().catch(() => undefined);
+        const fps = stream.getVideoTracks()[0]?.getSettings().frameRate;
+        setCamera(fps ? `camera ${Math.round(fps)} fps (reads cleanly up to ${Math.floor(fps / 2)} frames/s)` : "camera fps unknown");
         const detector = await qrDetector();
         if (cancelled) return;
         if (detector) {
@@ -223,7 +233,7 @@ function FilmStream() {
     };
   }, [running]);
 
-  const full = report ? { ...report, device: `${navigator.userAgent}${reader ? ` · ${reader === "detector" ? "BarcodeDetector" : "JS decoder"}` : ""}` } : null;
+  const full = report ? { ...report, device: `${navigator.userAgent}${reader ? ` · ${reader === "detector" ? "BarcodeDetector" : "JS decoder"}` : ""}${camera ? ` · ${camera}` : ""}` } : null;
   const text = full ? formatBenchmarkReport(full) : "";
 
   return (

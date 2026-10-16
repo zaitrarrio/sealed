@@ -12,6 +12,7 @@ import * as Device from "expo-device";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, Share, Text, View } from "react-native";
 import { CodeCamera } from "../src/components/CodeCamera";
+import type { LockResult } from "../src/lib/camera-lock";
 import { FacetStream } from "../src/components/FacetStream";
 import { PixelCamera } from "../src/components/PixelCamera";
 import { formatBytes } from "../src/lib/bytes";
@@ -156,6 +157,8 @@ function FilmStream() {
   const meter = useRef(new BenchmarkMeter());
   const [report, setReport] = useState<BenchmarkReport | null>(null);
   const [copied, setCopied] = useState(false);
+  const [lock, setLock] = useState<LockResult | null>(null);
+  const [cameraFps, setCameraFps] = useState<number | null>(null);
 
   // Live numbers four times a second while running.
   useEffect(() => {
@@ -185,8 +188,10 @@ function FilmStream() {
   const onCode = useCallback((text: string) => meter.current.pushCode(text), []);
   const onImage = useCallback(async (image: RgbaImage) => meter.current.pushImage(image), []);
 
-  const full = report ? { ...report, device: deviceLine() } : null;
-  const overlay = report ? <LiveNumbers r={report} /> : null;
+  const lockLine = lock ? `locked ${lock.locked.join(", ") || "nothing"}${lock.bias !== undefined ? ` · bias ${lock.bias}` : ""}${lock.exposure ? ` · 1/${Math.round(1 / lock.exposure.durationS)} s ISO ${lock.exposure.iso}` : ""}` : "auto focus/exposure";
+  const cameraLine = cameraFps ? `camera ${cameraFps} fps (reads cleanly up to ${Math.floor(cameraFps / 2)} frames/s)` : "camera fps unknown";
+  const full = report ? { ...report, device: `${deviceLine()} · ${cameraLine} · ${lockLine}` } : null;
+  const overlay = report ? <LiveNumbers r={report} lock={`${cameraLine} · ${lockLine}`} /> : null;
 
   return (
     <Stack>
@@ -205,7 +210,7 @@ function FilmStream() {
       {!running ? <Button title={report ? "Film again" : "Start filming"} tone="primary" onPress={start} testID="bench-film" /> : null}
       {running ? (
         path === "codes" ? (
-          <CodeCamera key={run} onCode={onCode} overlay={overlay} label="Camera view of the test stream" />
+          <CodeCamera key={run} onCode={onCode} onLock={setLock} onCameraFps={setCameraFps} overlay={overlay} label="Camera view of the test stream" />
         ) : (
           <PixelCamera key={run} onImage={onImage} overlay={overlay} label="Camera view of the test stream" />
         )
@@ -228,10 +233,10 @@ function FilmStream() {
   );
 }
 
-function LiveNumbers({ r }: { r: BenchmarkReport }) {
+function LiveNumbers({ r, lock }: { r: BenchmarkReport; lock: string }) {
   return (
     <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: "#F4EDE4" }}>
-      {`${r.inputs} read · ${r.validFrames} valid · ${Math.round(r.fraction * 100)}% · ${(r.goodputBytesPerSecond / 1024).toFixed(1)} KB/s · ${(r.elapsedMs / 1000).toFixed(0)} s`}
+      {`${r.inputs} read · ${r.validFrames} valid · ${Math.round(r.fraction * 100)}% · ${(r.goodputBytesPerSecond / 1024).toFixed(1)} KB/s · ${(r.elapsedMs / 1000).toFixed(0)} s\n${lock}`}
     </Text>
   );
 }

@@ -52,26 +52,54 @@ type ExtendedCapabilities = MediaTrackCapabilities & {
   focusMode?: string[];
   exposureMode?: string[];
   whiteBalanceMode?: string[];
+  /** In units of 100 µs (Media Capture image constraints). */
+  exposureTime?: { min: number; max: number; step?: number };
+  iso?: { min: number; max: number; step?: number };
   torch?: boolean;
 };
+type ExtendedSettings = MediaTrackSettings & { exposureTime?: number; iso?: number };
+
+/** Longest exposure that still freezes a 60 Hz display frame with margin: 1/500 s, in 100 µs units. */
+export const TARGET_EXPOSURE_UNITS = 20;
 
 /**
- * Best-effort lock of focus, exposure and white balance once the stream is aimed (ADR-0010 step 3).
- * Returns which settings were locked.
+ * Picks a manual exposure for reading a screen: the current exposure shortened to the target, ISO raised to keep
+ * the brightness, both clamped to the range. Null when the browser reports no range or the exposure is already
+ * short enough.
+ */
+export function shortenedExposure(caps: { exposureTime?: { min: number; max: number }; iso?: { min: number; max: number } }, settings: { exposureTime?: number; iso?: number }, target = TARGET_EXPOSURE_UNITS): { exposureTime: number; iso?: number } | null {
+  const r = caps.exposureTime;
+  if (!r || !(r.max > r.min) || !settings.exposureTime || settings.exposureTime <= target) return null;
+  const exposureTime = Math.min(Math.max(target, r.min), r.max);
+  if (!caps.iso || !settings.iso) return { exposureTime };
+  const iso = Math.min(Math.max(settings.iso * (settings.exposureTime / exposureTime), caps.iso.min), caps.iso.max);
+  return { exposureTime, iso: Math.round(iso) };
+}
+
+/**
+ * Best-effort lock of focus, exposure and white balance once the stream is aimed (ADR-0010 step 3, ADR-0021).
+ * Where the browser allows it, the exposure is also shortened so two display frames stop blending into one
+ * camera frame. Returns which settings were locked.
  */
 export async function lockCameraSettings(track: MediaStreamTrack): Promise<string[]> {
   const caps = (typeof track.getCapabilities === "function" ? track.getCapabilities() : {}) as ExtendedCapabilities;
+  const settings = (typeof track.getSettings === "function" ? track.getSettings() : {}) as ExtendedSettings;
   const locked: string[] = [];
   const tryApply = async (name: string, c: Record<string, unknown>) => {
     try {
       await track.applyConstraints({ advanced: [c as MediaTrackConstraintSet] });
       locked.push(name);
+      return true;
     } catch {
-      // not supported on this device
+      return false; // not supported on this device
     }
   };
   if (caps.focusMode?.includes("manual")) await tryApply("focus", { focusMode: "manual" });
-  if (caps.exposureMode?.includes("manual")) await tryApply("exposure", { exposureMode: "manual" });
+  if (caps.exposureMode?.includes("manual")) {
+    const want = shortenedExposure(caps, settings);
+    const shortened = want ? await tryApply(`exposure 1/${Math.round(10_000 / want.exposureTime)} s`, { exposureMode: "manual", ...want }) : false;
+    if (!shortened) await tryApply("exposure", { exposureMode: "manual" });
+  }
   if (caps.whiteBalanceMode?.includes("manual")) await tryApply("white balance", { whiteBalanceMode: "manual" });
   return locked;
 }

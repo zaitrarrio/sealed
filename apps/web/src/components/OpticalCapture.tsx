@@ -30,7 +30,7 @@ export function OpticalCapture({ init, onProgress, onComplete, onError }: { init
       const m = ev.data;
       if (m.type === "progress") {
         cbs.current.onProgress(m);
-        if (!lockedOnce && m.progress.calibrated && stream) {
+        if (!lockedOnce && (m.progress.calibrated || m.progress.framesDecoded > 0) && stream) {
           lockedOnce = true;
           const track = stream.getVideoTracks()[0];
           if (track) void lockCameraSettings(track).then(setLocked);
