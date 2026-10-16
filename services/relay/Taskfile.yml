@@ -48,6 +48,12 @@ tasks:
     cmds:
       - pnpm wrangler dev --env dev
 
+  dev:tunnel:
+    desc: Run the relay locally and expose it via a Cloudflare Tunnel
+    deps: [db:migrate]
+    cmds:
+      - pnpm wrangler dev --env dev --tunnel
+
   db:migrate:
     desc: Apply D1 migrations to the local dev database
     env:
