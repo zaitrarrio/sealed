@@ -15,3 +15,5 @@ pkg/
 .dev.vars
 deploy/selfhost/.env
 .turbo/
+.relay-url
+*.zip

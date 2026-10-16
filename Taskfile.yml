@@ -159,3 +159,13 @@ tasks:
     desc: Run the web client Vite dev server (alias for web:web)
     cmds:
       - task: web:web
+
+  dev:tunnel:
+    desc: Open Cloudflare tunnel as relay, configure relay, and run services
+    cmds:
+      - node tools/relay-tunnel.mjs --start-relay
+
+  dev:relay:tunnel:
+    desc: Run relay with Cloudflare tunnel and configure relay URL
+    cmds:
+      - node tools/relay-tunnel.mjs --start-relay

@@ -8,6 +8,9 @@
   },
   "scripts": {
     "dev": "turbo dev",
+    "dev:tunnel": "turbo dev:tunnel",
+    "dev:relay:tunnel": "node tools/relay-tunnel.mjs --start-relay",
+    "tunnel": "node tools/relay-tunnel.mjs",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "build": "turbo build",
