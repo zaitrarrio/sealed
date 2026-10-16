@@ -20,7 +20,8 @@
     "test:watch": "vitest",
     "fixtures:grid": "esbuild bench/grid-fixtures.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bench/grid-fixtures.mjs --log-level=warning && node dist/bench/grid-fixtures.mjs",
     "bench:profile": "esbuild bench/profile-grid.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bench/profile-grid.mjs --log-level=warning && node dist/bench/profile-grid.mjs",
-    "bench": "esbuild bench/optical.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bench/optical.mjs --log-level=warning && node dist/bench/optical.mjs"
+    "bench": "esbuild bench/optical.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bench/optical.mjs --log-level=warning && node dist/bench/optical.mjs",
+    "bench:sweep": "esbuild bench/optical-sweep.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bench/optical-sweep.mjs --log-level=warning && node dist/bench/optical-sweep.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "2.4.0",
