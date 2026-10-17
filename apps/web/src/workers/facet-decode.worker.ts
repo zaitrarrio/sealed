@@ -6,8 +6,9 @@
  * On completion it unwraps (Air-gap) or reads the in-clear key (Broadcast), opens and verifies the Envelope, and
  * posts the files back.
  */
-import { EnvelopeReader, FacetReceiver, airgapReceiverSas, openOpticalEnvelope, unwrapKey, type DeviceKeys, type FileEntry } from "@sealed/core";
+import { EnvelopeReader, FacetReceiver, airgapReceiverSas, loadNativeDecoder, openOpticalEnvelope, unwrapKey, type DeviceKeys, type FileEntry, type NativeDecoderFactory, type NativeGridDecoder, type ReceiveProgress } from "@sealed/core";
 import { deviceKeysFromStored } from "../lib/webcrypto-keys";
+import { nativeWasmUrl } from "../lib/native-wasm";
 import type { FromWorker, OpenedFileMessage, ToWorker, WorkerInit } from "./facet-protocol";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -17,6 +18,38 @@ const MAX_QUEUE = 4;
 const MAX_EDGE = 1920;
 
 let receiver = new FacetReceiver();
+
+/**
+ * Native grid decoder (ADR-0023): the Rust decoder as WebAssembly, loaded once per worker when a grid tier is
+ * allowed. Missing (not built) or failing to load → the JavaScript decoder in FacetReceiver, as before.
+ */
+let nativeFactory: Promise<NativeDecoderFactory | null> | null = null;
+let native: NativeGridDecoder | null = null;
+let nativeTiers: number[] = [];
+function loadNative(): Promise<NativeDecoderFactory | null> {
+  nativeFactory ??= (async () => {
+    try {
+      return await loadNativeDecoder(fetch(nativeWasmUrl));
+    } catch (e) {
+      console.warn("native grid decoder unavailable; using the JavaScript decoder", e);
+      post({ type: "note", message: `native grid decoder unavailable (${e instanceof Error ? e.message : String(e)}); using the JavaScript decoder` });
+      return null;
+    }
+  })();
+  return nativeFactory;
+}
+async function setupNative(tiers: number[] | undefined): Promise<void> {
+  native?.dispose();
+  native = null;
+  nativeTiers = (tiers ?? [0, 1, 2, 3]).filter((t) => t >= 1 && t <= 3);
+  if (nativeTiers.length === 0) return;
+  const f = await loadNative();
+  if (f) {
+    native = f.create(nativeTiers);
+    receiver.setGridFromImages(false);
+    post({ type: "note", message: `native grid decoder ready for tiers ${nativeTiers.join(",")}` });
+  }
+}
 let init: WorkerInit | null = null;
 let device: DeviceKeys | null = null;
 let queue: { frame: VideoFrame | ImageBitmap; timestamp: number }[] = [];
@@ -126,13 +159,22 @@ async function pump(): Promise<void> {
         closeFrame(item.frame);
       }
       if (!img) continue;
-      const progress = receiver.push({ width: img.width, height: img.height, data: img.data }, item.timestamp);
+      const image = { width: img.width, height: img.height, data: img.data };
+      let progress: ReceiveProgress;
+      if (native) {
+        // Grid frames natively; the receiver then only looks for QR codes in the image (when tier 0 is allowed).
+        const frames = native.push(image);
+        for (const f of frames) receiver.pushFrameBytes(f, item.timestamp);
+        progress = frames.length > 0 ? receiver.progress : receiver.push(image, item.timestamp);
+      } else {
+        progress = receiver.push(image, item.timestamp);
+      }
       await tryManifest();
       const now = performance.now();
       if (progress.complete || now - lastPost > 100) {
         lastPost = now;
         const d = receiver.descriptor;
-        post({ type: "progress", progress, sas: currentSas(), senderLabel: d?.senderLabel ?? null, files: manifestFiles, queue: queue.length, measurement: receiver.measure() });
+        post({ type: "progress", progress, sas: currentSas(), senderLabel: d?.senderLabel ?? null, files: manifestFiles, queue: queue.length, measurement: receiver.measure(), nativeDecoder: native !== null });
       }
       if (progress.complete) {
         for (const q of queue) closeFrame(q.frame);
@@ -153,7 +195,7 @@ async function handleCode(text: string, timestamp: number): Promise<void> {
   if (progress.complete || now - lastPost > 100) {
     lastPost = now;
     const d = receiver.descriptor;
-    post({ type: "progress", progress, sas: currentSas(), senderLabel: d?.senderLabel ?? null, files: manifestFiles, queue: queue.length, measurement: receiver.measure() });
+    post({ type: "progress", progress, sas: currentSas(), senderLabel: d?.senderLabel ?? null, files: manifestFiles, queue: queue.length, measurement: receiver.measure(), nativeDecoder: native !== null });
   }
   if (progress.complete && !finished) {
     for (const q of queue) closeFrame(q.frame);
@@ -168,6 +210,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
     case "init":
       init = msg;
       receiver = new FacetReceiver(msg.tiers ? { tiers: msg.tiers } : {});
+      void setupNative(msg.tiers);
       finished = false;
       manifestFiles = null;
       manifestTried = null;
@@ -179,6 +222,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       for (const q of queue) closeFrame(q.frame);
       queue = [];
       receiver = new FacetReceiver(init?.tiers ? { tiers: init.tiers } : {});
+      void setupNative(init?.tiers);
       finished = false;
       manifestFiles = null;
       manifestTried = null;

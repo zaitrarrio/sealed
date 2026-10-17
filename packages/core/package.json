@@ -9,6 +9,7 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./wasm/*": "./wasm/*",
     "./*": {
       "types": "./src/*.ts",
       "default": "./src/*.ts"

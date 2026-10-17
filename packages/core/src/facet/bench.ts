@@ -14,6 +14,7 @@ import { openOpticalEnvelope, prepareBroadcastStream, type QrStreamOptions } fro
 import type { FacetSender } from "./sender";
 import { TIERS } from "./tiers";
 import type { RgbaImage, Tier } from "./types";
+import type { NativeGridDecoder } from "./native";
 
 const NAME = /^sealed-bench-(\d{1,10})-(\d{1,9})\.bin$/;
 export const BENCHMARK_SIZES = [16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024] as const;
@@ -91,6 +92,8 @@ export interface BenchmarkReport {
   goodputBytesPerSecond: number;
   /** Measured decode time per camera frame (image path only). */
   decodeMsPerFrame: number | null;
+  /** Which decoder handled camera frames: the native module (ADR-0023) or the JavaScript one. */
+  decoder: "native" | "javascript" | null;
   verified: boolean | null;
   error: string | null;
   device?: string;
@@ -108,6 +111,8 @@ export class BenchmarkMeter {
   private error: string | null = null;
   private payloadBytes: number | null = null;
   private finishing: Promise<void> | null = null;
+  private native: NativeGridDecoder | null = null;
+  private nativeMs: number[] = [];
 
   constructor(private readonly now: () => number = () => (typeof performance !== "undefined" ? performance.now() : Date.now())) {}
 
@@ -120,7 +125,27 @@ export class BenchmarkMeter {
   }
 
   pushImage(image: RgbaImage): void {
-    this.track(() => this.receiver.push(image, this.now()));
+    const native = this.native;
+    if (!native) {
+      this.track(() => this.receiver.push(image, this.now()));
+      return;
+    }
+    this.track(() => {
+      const t0 = this.now();
+      const frames = native.push(image);
+      this.nativeMs.push(this.now() - t0);
+      if (this.nativeMs.length > 120) this.nativeMs.shift();
+      let p = this.receiver.progress;
+      for (const f of frames) p = this.receiver.pushFrameBytes(f, this.now());
+      // No grid frame: the receiver may still find a QR code in the image.
+      return frames.length ? p : this.receiver.push(image, this.now());
+    });
+  }
+
+  /** Decodes grid tiers with the native module from now on; the receiver keeps QR from images. */
+  useNative(decoder: NativeGridDecoder): void {
+    this.native = decoder;
+    this.receiver.setGridFromImages(false);
   }
 
   private track(push: () => { framesDecoded: number; complete: boolean }): void {
@@ -198,7 +223,8 @@ export class BenchmarkMeter {
       inputsPerSecond: secs > 0 ? this.inputs / secs : 0,
       validFramesPerSecond: secs > 0 ? p.framesDecoded / secs : 0,
       goodputBytesPerSecond: Math.round(goodput),
-      decodeMsPerFrame: m.decodeMsPerFrame > 0 ? Math.round(m.decodeMsPerFrame) : null,
+      decodeMsPerFrame: this.native ? (this.nativeMs.length ? Math.round(this.nativeMs.reduce((a, b) => a + b, 0) / this.nativeMs.length) : null) : m.decodeMsPerFrame > 0 ? Math.round(m.decodeMsPerFrame) : null,
+      decoder: this.native ? "native" : m.decodeMsPerFrame > 0 ? "javascript" : null,
       verified: this.verified,
       error: this.error,
     };
@@ -236,7 +262,7 @@ export function formatBenchmarkReport(r: BenchmarkReport): string {
     `valid frames    ${r.validFrames} (${r.validFramesPerSecond.toFixed(1)}/s)`,
     `symbols         ${r.symbolsReceived}/${r.symbolsNeeded || "?"} (${Math.round(r.fraction * 100)}%)`,
     `goodput         ${kb(r.goodputBytesPerSecond)}/s`,
-    `decode/frame    ${r.decodeMsPerFrame !== null ? `${r.decodeMsPerFrame} ms` : "n/a (platform detector)"}`,
+    `decode/frame    ${r.decodeMsPerFrame !== null ? `${r.decodeMsPerFrame} ms (${r.decoder ?? "javascript"})` : "n/a (platform detector)"}`,
     `verified        ${r.verified === null ? "not yet" : r.verified ? "yes" : "NO"}`,
   ];
   if (r.device) lines.push(`device          ${r.device}`);

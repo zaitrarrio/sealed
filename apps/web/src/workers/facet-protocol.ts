@@ -46,7 +46,8 @@ export interface OpenedFileMessage {
 }
 
 export type FromWorker =
-  | { type: "progress"; progress: ReceiveProgress; sas: string | null; senderLabel: string | null; files: { path: string; size: number }[] | null; queue: number; measurement: { captureFps: number; pixelsPerCell: number; decodeMsPerFrame: number } }
+  | { type: "note"; message: string }
+  | { type: "progress"; progress: ReceiveProgress; sas: string | null; senderLabel: string | null; files: { path: string; size: number }[] | null; queue: number; measurement: { captureFps: number; pixelsPerCell: number; decodeMsPerFrame: number }; nativeDecoder: boolean }
   | {
       type: "complete";
       mode: DecodeMode;

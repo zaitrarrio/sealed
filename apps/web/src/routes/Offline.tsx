@@ -16,6 +16,7 @@ import { TorchBeacon } from "../components/TorchBeacon";
 import { TorchWatcher } from "../components/TorchWatcher";
 import { useLiveRate } from "../lib/rate-adapt";
 import { useTorchSignal } from "../lib/torch-signal";
+import { nativeDecoderAvailable } from "../lib/native-wasm";
 import { CheckCode, Notice, PageTitle, Progress, Spinner, Steps, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
 import { cameraAvailable } from "../lib/camera";
@@ -259,11 +260,11 @@ export function ReceiveOfflinePage() {
     void kvGet<StoredDeviceKeys>("device-keys").then((k) => setStored(k ?? null));
   }, [s.keys]);
 
-  // T0: QR frames, which this browser reads with its QR detector (or its own decoder) and every sender can make.
-  // The colour-grid tiers need a faster pixel decoder than the browser has (ADR-0018).
-  const makeOffer = () => {
+  // The tier offered is what this browser can decode: grid tier 1 with the native decoder (ADR-0023), else T0
+  // QR frames read by the browser's QR detector (ADR-0018). Every sender can make either.
+  const makeOffer = async () => {
     if (!s.keys) return;
-    const tier: Tier = 0;
+    const tier: Tier = (await nativeDecoderAvailable()) ? 1 : 0;
     const o = createReverseKeyOffer(codeOrigin(), s.keys, s.profile.label || "Sealed receiver", tier);
     setOffer({ ...o, tier });
   };
@@ -273,7 +274,7 @@ export function ReceiveOfflinePage() {
   useEffect(() => {
     if (!s.keys || offered.current) return;
     offered.current = true;
-    makeOffer();
+    void makeOffer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.keys]);
 
@@ -301,6 +302,11 @@ export function ReceiveOfflinePage() {
         <div className="stack-lg" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
           {offer ? <QrCode text={offer.code} label="Offline key code" testId="reverse-key-code" /> : <Spinner label="Preparing…" />}
           <p className="muted">They film this with Sealed → Share offline. It carries only this device's public key; nothing secret.</p>
+          {offer && (
+            <p className="subtle" data-testid="offer-tier" data-tier={offer.tier}>
+              {offer.tier === 0 ? "This browser reads QR frames." : "This browser decodes colour-grid frames natively (faster)."}
+            </p>
+          )}
           <button type="button" className="btn primary block" disabled={!offer || !stored} onClick={() => setCapturing(true)} data-testid="start-capture">
             They have it — switch to my camera
           </button>

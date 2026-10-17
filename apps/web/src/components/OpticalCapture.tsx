@@ -33,6 +33,7 @@ export function OpticalCapture({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locked, setLocked] = useState<string[] | null>(null);
   const [reader, setReader] = useState<"detector" | "frames" | null>(null);
+  const [nativeDecoder, setNativeDecoder] = useState(false);
   const cbs = useRef({ onProgress, onComplete, onError, onTorchSupport });
   cbs.current = { onProgress, onComplete, onError, onTorchSupport };
 
@@ -49,8 +50,11 @@ export function OpticalCapture({
     let lockedOnce = false;
     worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       const m = ev.data;
-      if (m.type === "progress") {
+      if (m.type === "note") {
+        console.info(m.message);
+      } else if (m.type === "progress") {
         cbs.current.onProgress(m);
+        setNativeDecoder(m.nativeDecoder);
         if (!lockedOnce && (m.progress.calibrated || m.progress.framesDecoded > 0) && stream) {
           lockedOnce = true;
           const track = stream.getVideoTracks()[0];
@@ -119,7 +123,11 @@ export function OpticalCapture({
           <video ref={videoRef} playsInline muted aria-label="Camera view of the sender's screen" />
         </div>
       )}
-      {reader && <p className="subtle">{reader === "detector" ? "Reading with the browser's QR detector — the code can be anywhere in view." : "Reading camera frames in Sealed's decoder (this browser has no QR detector); hold the other screen close and steady."}</p>}
+      {reader && (
+        <p className="subtle" data-testid="capture-reader" data-native={nativeDecoder ? "1" : "0"}>
+          {reader === "detector" ? "Reading with the browser's QR detector — the code can be anywhere in view." : `Reading camera frames in Sealed's ${nativeDecoder ? "native" : "JavaScript"} decoder; hold the other screen close and steady.`}
+        </p>
+      )}
       {locked && <p className="subtle">{locked.length ? `Camera ${locked.join(", ")} locked for the stream.` : "This camera does not allow locking focus or exposure; hold steady."}</p>}
     </div>
   );

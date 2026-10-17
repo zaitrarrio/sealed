@@ -4,7 +4,9 @@
  * browser's BarcodeDetector (fast path) or raw camera frames (fallback: rasterized and decoded here, newest
  * frame wins while a decode is running). Posts a report four times a second and once more after verification.
  */
-import { BenchmarkMeter, type BenchmarkReport } from "@sealed/core";
+import { BenchmarkMeter, loadNativeDecoder, type BenchmarkReport, type NativeDecoderFactory } from "@sealed/core";
+
+import { nativeWasmUrl } from "../lib/native-wasm";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -18,6 +20,14 @@ export type FromBenchWorker = { type: "report"; report: BenchmarkReport };
 const MAX_EDGE = 1280;
 let meter = new BenchmarkMeter();
 let running = false;
+let nativeFactory: Promise<NativeDecoderFactory | null> | null = null;
+function loadNative(): Promise<NativeDecoderFactory | null> {
+  nativeFactory ??= loadNativeDecoder(fetch(nativeWasmUrl)).catch((e: unknown) => {
+    console.warn("native grid decoder unavailable; using the JavaScript decoder", e);
+    return null;
+  });
+  return nativeFactory;
+}
 let timer: ReturnType<typeof setInterval> | null = null;
 let pending: VideoFrame | ImageBitmap | null = null;
 let decoding = false;
@@ -86,8 +96,16 @@ async function finish(): Promise<void> {
 self.onmessage = (ev: MessageEvent<ToBenchWorker>) => {
   const m = ev.data;
   switch (m.type) {
-    case "start":
-      meter = new BenchmarkMeter();
+    case "start": {
+      const started = new BenchmarkMeter();
+      meter = started;
+      // Grid tiers through the native module when it is available (ADR-0023); frames before it loads use JavaScript.
+      const grid = (m.tiers ?? [0, 1, 2, 3]).filter((t) => t >= 1 && t <= 3);
+      if (grid.length) {
+        void loadNative().then((f) => {
+          if (f && meter === started && running) started.useNative(f.create(grid));
+        });
+      }
       running = true;
       close(pending);
       pending = null;
@@ -95,6 +113,7 @@ self.onmessage = (ev: MessageEvent<ToBenchWorker>) => {
       timer = setInterval(post, 250);
       post();
       return;
+    }
     case "code":
       if (!running) return;
       meter.pushCode(m.text);

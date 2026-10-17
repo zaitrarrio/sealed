@@ -55,6 +55,9 @@ test("Air-gap receive: reverse key code → Facet stream on the camera → check
   const code = (await page.getByTestId("reverse-key-code").getAttribute("data-code"))!;
   const rk = parseCode(code);
   if (rk.kind !== "reverse-key") throw new Error("expected a reverse key code");
+  // With the native decoder built, the browser offers grid tier 1 and the sender streams it (ADR-0023).
+  expect(rk.tier).toBe(1);
+  await expect(page.getByTestId("offer-tier")).toHaveAttribute("data-tier", "1");
 
   const payload = randomBytes(30_000);
   const { sender, sas } = await prepareAirgapStream({ files: [{ path: "airgap.bin", mediaType: "application/octet-stream", size: payload.length, data: new Uint8Array(payload) }], reverseKey: rk, senderLabel: "Optical sender", tier: 1 });
@@ -64,6 +67,8 @@ test("Air-gap receive: reverse key code → Facet stream on the camera → check
 
   await page.getByTestId("start-capture").click();
   await expect(page.getByTestId("airgap-receiver-sas")).toHaveText(sas, { timeout: 60_000 });
+  // Grid frames are decoded by the native module (ADR-0023); the page says so once the first progress arrives.
+  await expect(page.getByTestId("capture-reader")).toHaveAttribute("data-native", "1");
   await expect(page.getByTestId("airgap-done")).toBeVisible({ timeout: 120_000 });
   const got = await saveDownload(page, "save-0");
   expect(sha256(got)).toBe(sha256(payload));

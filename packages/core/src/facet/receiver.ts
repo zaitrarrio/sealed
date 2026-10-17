@@ -31,6 +31,11 @@ export interface FacetReceiverOptions {
   expectedStreamId?: Uint8Array;
   /** Tiers this receiver decodes (default all). A T0-only receiver models a plain QR scanner. */
   tiers?: readonly Tier[];
+  /**
+   * Whether `push(image)` decodes grid tiers from pixels (default true). False when a native decoder handles
+   * grid frames and feeds them through `pushFrameBytes`, so images are only searched for QR codes.
+   */
+  gridFromImages?: boolean;
 }
 
 interface TierState {
@@ -91,6 +96,7 @@ export class FacetReceiver {
   private decodeMs: number[] = [];
   private lastPixelsPerCell = NaN;
   private lastTier: Tier | null = null;
+  private gridFromImages: boolean;
   private _progress: ReceiveProgress = emptyProgress();
   private readonly lossEstimator = new LossEstimator();
 
@@ -98,6 +104,12 @@ export class FacetReceiver {
     if (opts.expectedStreamId && opts.expectedStreamId.length !== 4) throw new RangeError("expectedStreamId must be 4 bytes");
     this.streamId = opts.expectedStreamId ? opts.expectedStreamId.slice() : null;
     this.allowed = new Set(opts.tiers ?? [0, 1, 2, 3]);
+    this.gridFromImages = opts.gridFromImages ?? true;
+  }
+
+  /** See `FacetReceiverOptions.gridFromImages`; may be changed once a native decoder has loaded. */
+  setGridFromImages(enabled: boolean): void {
+    this.gridFromImages = enabled;
   }
 
   get progress(): ReceiveProgress {
@@ -156,7 +168,7 @@ export class FacetReceiver {
     try {
       if (isImage(image)) {
         let handled = false;
-        if (this.allowed.has(1) || this.allowed.has(2) || this.allowed.has(3)) {
+        if (this.gridFromImages && (this.allowed.has(1) || this.allowed.has(2) || this.allowed.has(3))) {
           const t0 = now();
           handled = this.tryGrid(image);
           if (handled) {
