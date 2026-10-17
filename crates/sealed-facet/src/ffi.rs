@@ -54,14 +54,25 @@ pub unsafe extern "C" fn facet_decoder_free(dec: *mut GridDecoder) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn facet_decoder_push(dec: *mut GridDecoder, ptr: *const u8, width: u32, height: u32, stride: u32) -> u32 {
+pub unsafe extern "C" fn facet_decoder_push(
+    dec: *mut GridDecoder,
+    ptr: *const u8,
+    width: u32,
+    height: u32,
+    stride: u32,
+) -> u32 {
     if dec.is_null() || ptr.is_null() || width == 0 || height == 0 || stride < width * 4 {
         return 0;
     }
     let len = stride as usize * height as usize;
     // SAFETY: the host passes a buffer of at least stride × height bytes that outlives this call.
     let (dec, data) = unsafe { (&mut *dec, std::slice::from_raw_parts(ptr, len)) };
-    let img = RgbaImage { width: width as usize, height: height as usize, stride: stride as usize, data };
+    let img = RgbaImage {
+        width: width as usize,
+        height: height as usize,
+        stride: stride as usize,
+        data,
+    };
     dec.push(&img).len() as u32
 }
 
@@ -76,13 +87,20 @@ pub unsafe extern "C" fn facet_decoder_frame_len(dec: *const GridDecoder, i: u32
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn facet_decoder_frame_copy(dec: *const GridDecoder, i: u32, out: *mut u8, cap: u32) -> u32 {
+pub unsafe extern "C" fn facet_decoder_frame_copy(
+    dec: *const GridDecoder,
+    i: u32,
+    out: *mut u8,
+    cap: u32,
+) -> u32 {
     if dec.is_null() || out.is_null() {
         return 0;
     }
     // SAFETY: valid handle; `out` has room for `cap` bytes (the host's contract).
     let dec = unsafe { &*dec };
-    let Some(f) = dec.frames().get(i as usize) else { return 0 };
+    let Some(f) = dec.frames().get(i as usize) else {
+        return 0;
+    };
     let n = f.len().min(cap as usize);
     unsafe { std::ptr::copy_nonoverlapping(f.as_ptr(), out, n) };
     n as u32

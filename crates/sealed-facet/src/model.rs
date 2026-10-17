@@ -14,6 +14,7 @@
 //! `Float64Array` or plain numbers, with every accumulation done in `f64` and rounded once on store.
 
 use crate::glyphs::GLYPH_MARGIN;
+use crate::parallel::{par_rows, parts_for};
 
 /// Neighborhood radius in cells; Gaussian tails beyond 2 cells are < 0.1% for σ ≤ 0.6.
 pub const ISI_RADIUS: usize = 2;
@@ -163,7 +164,8 @@ pub fn predict_features(
 }
 
 /// Predicted features of every cell written to `out` (`n² × 12`, overwritten). Computed separably: a horizontal
-/// pass mixes quadrant columns, then a vertical pass mixes quadrant rows.
+/// pass mixes quadrant columns, then a vertical pass mixes quadrant rows. Both passes run row-parallel when
+/// threads are available (rows are independent; every element is accumulated in the same order either way).
 pub fn predict_features_into(
     model: &ResponseModel,
     src: &SourceGrid,
@@ -174,87 +176,94 @@ pub fn predict_features_into(
     if out.len() != n * n * 12 {
         return Err(LengthMismatch);
     }
+    if n == 0 {
+        return Ok(());
+    }
     let r = ISI_RADIUS as isize;
     let gq = &model.gq;
     let gf = &model.gf;
-    // Horizontal pass: A[cell][qa][qsy][ch] (12 floats) for glyph sources, Af[cell][qa][ch] (6) for full cells.
-    let mut a = vec![0f32; n * n * 12];
-    let mut af = vec![0f32; n * n * 6];
+    // Horizontal pass, per cell: A[qa][qsy][ch] (12 floats) for glyph sources, then Af[qa][ch] (6) for full
+    // cells: `hp[cell * H + …]`.
+    const H: usize = 18;
+    let mut hp = vec![0f32; n * n * H];
     let sq = &src.q;
     let sf = &src.f;
-    for y in 0..n {
-        for x in 0..n {
-            let t = y * n + x;
-            let ao = t * 12;
-            let afo = t * 6;
-            for dx in -r..=r {
-                let sx = x as isize + dx;
-                if sx < 0 || sx >= n as isize {
-                    continue;
-                }
-                let s = y * n + sx as usize;
-                let di = (dx + r) as usize;
-                let so = s * 12;
-                let fo = s * 3;
-                for qa in 0..2 {
-                    let g0 = gq[(qa * SPAN + di) * 2];
-                    let g1 = gq[(qa * SPAN + di) * 2 + 1];
-                    let gff = gf[qa * SPAN + di];
-                    for qsy in 0..2 {
-                        let b0 = so + (qsy * 2) * 3; // source quadrant (qsx = 0, qsy)
-                        let b1 = so + (qsy * 2 + 1) * 3; // (qsx = 1, qsy)
-                        let o = ao + (qa * 2 + qsy) * 3;
-                        for ch in 0..3 {
-                            a[o + ch] = (a[o + ch] as f64
-                                + g0 * sq[b0 + ch] as f64
-                                + g1 * sq[b1 + ch] as f64)
-                                as f32;
-                        }
+    let parts = parts_for(n, 8);
+    par_rows(&mut hp, n * H, 1, parts, |y0, rows| {
+        for (yy, hrow) in rows.chunks_exact_mut(n * H).enumerate() {
+            let y = y0 + yy;
+            for (x, cell) in hrow.chunks_exact_mut(H).enumerate() {
+                for dx in -r..=r {
+                    let sx = x as isize + dx;
+                    if sx < 0 || sx >= n as isize {
+                        continue;
                     }
-                    let fo2 = afo + qa * 3;
-                    for ch in 0..3 {
-                        af[fo2 + ch] = (af[fo2 + ch] as f64 + gff * sf[fo + ch] as f64) as f32;
-                    }
-                }
-            }
-        }
-    }
-    out.fill(0.0);
-    for y in 0..n {
-        for x in 0..n {
-            let t = y * n + x;
-            let fo = t * 12;
-            for dy in -r..=r {
-                let sy = y as isize + dy;
-                if sy < 0 || sy >= n as isize {
-                    continue;
-                }
-                let s = sy as usize * n + x;
-                let di = (dy + r) as usize;
-                let ao = s * 12;
-                let afo = s * 6;
-                for qb in 0..2 {
-                    let g0 = gq[(qb * SPAN + di) * 2];
-                    let g1 = gq[(qb * SPAN + di) * 2 + 1];
-                    let gff = gf[qb * SPAN + di];
+                    let s = y * n + sx as usize;
+                    let di = (dx + r) as usize;
+                    let so = s * 12;
+                    let fo = s * 3;
                     for qa in 0..2 {
-                        let q = qb * 2 + qa;
-                        let o = fo + q * 3;
-                        let a0 = ao + (qa * 2) * 3; // qsy = 0
-                        let a1 = ao + (qa * 2 + 1) * 3; // qsy = 1
-                        let afi = afo + qa * 3;
+                        let g0 = gq[(qa * SPAN + di) * 2];
+                        let g1 = gq[(qa * SPAN + di) * 2 + 1];
+                        let gff = gf[qa * SPAN + di];
+                        for qsy in 0..2 {
+                            let b0 = so + (qsy * 2) * 3; // source quadrant (qsx = 0, qsy)
+                            let b1 = so + (qsy * 2 + 1) * 3; // (qsx = 1, qsy)
+                            let o = (qa * 2 + qsy) * 3;
+                            for ch in 0..3 {
+                                cell[o + ch] = (cell[o + ch] as f64
+                                    + g0 * sq[b0 + ch] as f64
+                                    + g1 * sq[b1 + ch] as f64)
+                                    as f32;
+                            }
+                        }
+                        let fo2 = 12 + qa * 3;
                         for ch in 0..3 {
-                            out[o + ch] = (out[o + ch] as f64
-                                + g0 * a[a0 + ch] as f64
-                                + g1 * a[a1 + ch] as f64
-                                + gff * af[afi + ch] as f64)
-                                as f32;
+                            cell[fo2 + ch] =
+                                (cell[fo2 + ch] as f64 + gff * sf[fo + ch] as f64) as f32;
                         }
                     }
                 }
             }
         }
-    }
+    });
+    let hp = &hp;
+    par_rows(out, n * 12, 1, parts, |y0, rows| {
+        for (yy, orow) in rows.chunks_exact_mut(n * 12).enumerate() {
+            let y = y0 + yy;
+            for (x, ocell) in orow.chunks_exact_mut(12).enumerate() {
+                ocell.fill(0.0);
+                for dy in -r..=r {
+                    let sy = y as isize + dy;
+                    if sy < 0 || sy >= n as isize {
+                        continue;
+                    }
+                    let s = sy as usize * n + x;
+                    let di = (dy + r) as usize;
+                    let a = &hp[s * H..s * H + H];
+                    for qb in 0..2 {
+                        let g0 = gq[(qb * SPAN + di) * 2];
+                        let g1 = gq[(qb * SPAN + di) * 2 + 1];
+                        let gff = gf[qb * SPAN + di];
+                        for qa in 0..2 {
+                            let q = qb * 2 + qa;
+                            let o = q * 3;
+                            let a0 = (qa * 2) * 3; // qsy = 0
+                            let a1 = (qa * 2 + 1) * 3; // qsy = 1
+                            let afi = 12 + qa * 3;
+                            for ch in 0..3 {
+                                ocell[o + ch] = (ocell[o + ch] as f64
+                                    + g0 * a[a0 + ch] as f64
+                                    + g1 * a[a1 + ch] as f64
+                                    + gff * a[afi + ch] as f64)
+                                    as f32;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
     Ok(())
 }
 

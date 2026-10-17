@@ -49,3 +49,6 @@ console_error_panic_hook = "0.1"
 lto = true
 codegen-units = 1
 opt-level = "s"
+
+[profile.release.package.sealed-facet]
+opt-level = 3

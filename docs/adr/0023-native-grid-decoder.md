@@ -47,10 +47,25 @@ a port of the real decoder.
   CI builds the wasm before the web app.
 - Fixtures are tens of MB and generated on demand, not committed.
 
+## Results (2026-10-17, simulated 1280×960 captures, byte-exact against the JavaScript decoder)
+
+| Path | T1 data frame | T3 data frame |
+|---|---|---|
+| JavaScript (Node) | ≈ 600 ms | ≈ 1,100 ms |
+| Rust, one thread | ≈ 90 ms | ≈ 150 ms |
+| Rust, threads (2-core box) | ≈ 65 ms | ≈ 95 ms |
+| WebAssembly (Node, single-threaded, SSE2-class SIMD) | ≈ 120 ms | ≈ 200 ms |
+
+The remaining single-thread cost is dense LMMSE products at the SIMD width of baseline x86-64; everything heavy
+is row-, cell- or codeword-parallel, so a 4–8-core phone with NEON is expected to land well under the frame
+interval of T1 (100 ms) and near it for T3 (50 ms). The web receiver offers tier 1 when the module loads.
+
 ## Verification
 
 - Per-module parity tests with TypeScript-generated vectors under `crates/sealed-facet/tests/vectors`.
 - Fixture parity: every stage's output within tolerance of the JavaScript result; decoded payload bytes equal.
 - `packages/core/test/facet/native.test.ts`: the wasm decodes the fixture captures to the frames the sender
   emitted, feeds `FacetReceiver`, and is faster than the JavaScript decoder (the measured ratio is printed).
+- `crates/sealed-facet/tests/profile.rs` prints per-stage times; `tests/receiver.rs` runs the whole path.
+- Web e2e: the offline receive page offers tier 1 and decodes a T1 stream from the fake camera natively.
 - On devices: the Benchmark's grid tiers with the native decoder, compared with the JavaScript path.

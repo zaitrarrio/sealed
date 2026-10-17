@@ -23,6 +23,7 @@ use crate::model::{SourceGrid, new_source_grid, predict_features, response_model
 use crate::palette::{
     GRAY_RAMP, linear_background, linear_white, palette_excess, srgb_to_linear_8,
 };
+use crate::parallel::{par_rows, parts_for};
 use crate::sample::{CellSamples, ChannelLut, LUT_LEN, code_lut, linear_lut, sample_cells};
 use crate::types::{Homography, RgbaImage};
 
@@ -365,6 +366,21 @@ fn srgb_decode_continuous(code_fraction: f64) -> f64 {
     }
 }
 
+/// Evaluates `f` at every σ in `sigmas`, across the worker threads when available, in input order.
+fn eval_all<F: Fn(f64) -> Option<AffineFit> + Sync>(
+    sigmas: &[f64],
+    f: F,
+) -> Vec<Option<AffineFit>> {
+    let mut out: Vec<Option<AffineFit>> = (0..sigmas.len()).map(|_| None).collect();
+    let parts = parts_for(sigmas.len(), 1);
+    par_rows(&mut out, 1, 1, parts, |i0, rows| {
+        for (i, r) in rows.iter_mut().enumerate() {
+            *r = f(sigmas[i0 + i]);
+        }
+    });
+    out
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CalibrationFit {
     pub channel: ChannelCalibration,
@@ -453,23 +469,36 @@ pub fn fit_channel(
     };
     let mut best_sigma = sigma0;
     let mut best: Option<AffineFit> = None;
+    let mut grid: Vec<f64> = Vec::new();
     let mut s = lo;
     while s <= hi + 1e-9 {
-        if let Some(r) = eval_sigma(s, &centroids)
+        grid.push(s);
+        s += 0.05;
+    }
+    // The grid points are independent fits (evaluated across the worker threads); the first lowest residual wins,
+    // in grid order.
+    for (&s, r) in grid
+        .iter()
+        .zip(eval_all(&grid, |s| eval_sigma(s, &centroids)))
+    {
+        if let Some(r) = r
             && best.as_ref().is_none_or(|b| r.mse < b.mse)
         {
             best = Some(r);
             best_sigma = s;
         }
-        s += 0.05;
     }
     let mut best = best?;
     for step in [0.02, 0.01] {
-        for s in [best_sigma - step, best_sigma + step] {
-            if !(SIGMA_MIN..=SIGMA_MAX).contains(&s) {
-                continue;
-            }
-            if let Some(r) = eval_sigma(s, &centroids)
+        let pair: Vec<f64> = [best_sigma - step, best_sigma + step]
+            .into_iter()
+            .filter(|s| (SIGMA_MIN..=SIGMA_MAX).contains(s))
+            .collect();
+        for (&s, r) in pair
+            .iter()
+            .zip(eval_all(&pair, |s| eval_sigma(s, &centroids)))
+        {
+            if let Some(r) = r
                 && r.mse < best.mse
             {
                 best = r;

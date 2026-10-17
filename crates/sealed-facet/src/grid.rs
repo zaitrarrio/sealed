@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 use crate::header::{HEADER_BITS, frame_type_index, header_strip_bits, js_cmp};
 use crate::layout::{CellKind, GridLayout, calibration_layout, cells_to_stream, stream_to_cells};
+use crate::parallel::{par_rows, parts_for, worker_count};
 use crate::random::{SeedPart, Xorshift32, seed_from};
 use crate::rs::ReedSolomon;
 use crate::types::{FrameType, GridTier};
@@ -246,106 +247,75 @@ pub fn decode_stream(
     let mut ok = vec![0u8; c_n];
     let mut stream = received[..sb].to_vec();
     let mut payload = vec![0u8; t_len];
-    let mut cw = vec![0u8; rs.n];
-    let mut conf = vec![0f32; rs.n];
-    let mut enc = vec![0u8; rs.n];
-    let max_erasures = rs.n - rs.k;
     let mut failed = 0usize;
-    for c in 0..c_n {
-        if let Some(k) = known
-            && k.ok[c] != 0
-        {
-            ok[c] = 1;
-            for p in 0..rs.n {
-                let j = p * c_n + c;
-                stream[j] = k.stream[j];
-                if p < rs.k && j < t_len {
-                    payload[j] = stream[j] ^ mask[j];
+    // Codewords are independent: they are decoded in batches across the worker threads, and the batch results
+    // are then folded in codeword order (so the failure limit stops exactly where a sequential walk would, at the
+    // cost of at most one batch of extra decoding).
+    let workers = worker_count();
+    let batch = if workers > 1 { workers * 2 } else { c_n.max(1) };
+    let mut results: Vec<CodewordResult> = Vec::with_capacity(batch);
+    let mut c0 = 0usize;
+    while c0 < c_n {
+        let c1 = c_n.min(c0 + batch);
+        results.clear();
+        results.resize_with(c1 - c0, || CodewordResult::Known);
+        par_rows(&mut results, 1, 1, parts_for(c1 - c0, 1), |i0, rows| {
+            let mut scratch = CodewordScratch::new(rs.n);
+            for (i, r) in rows.iter_mut().enumerate() {
+                let c = c0 + i0 + i;
+                if known.is_some_and(|k| k.ok[c] != 0) {
+                    continue;
+                }
+                *r = decode_codeword(
+                    rs,
+                    c,
+                    c_n,
+                    t_len,
+                    received,
+                    mask,
+                    byte_conf,
+                    forced_erasures,
+                    &mut scratch,
+                );
+            }
+        });
+        for (c, r) in (c0..c1).zip(results.drain(..)) {
+            match r {
+                CodewordResult::Known => {
+                    let k = known.expect("known codewords come from `known`");
+                    ok[c] = 1;
+                    for p in 0..rs.n {
+                        let j = p * c_n + c;
+                        stream[j] = k.stream[j];
+                        if p < rs.k && j < t_len {
+                            payload[j] = stream[j] ^ mask[j];
+                        }
+                    }
+                }
+                CodewordResult::Failed => {
+                    failed += 1;
+                    if failed >= max_failures {
+                        return Some(StreamDecodeResult {
+                            payload: None,
+                            ok,
+                            stream,
+                            failed,
+                        });
+                    }
+                }
+                CodewordResult::Decoded { out, enc } => {
+                    ok[c] = 1;
+                    for p in 0..rs.n {
+                        let j = p * c_n + c;
+                        stream[j] = enc[p] ^ mask[j];
+                        if p < rs.k && j < t_len {
+                            payload[j] = out[p];
+                        }
+                    }
                 }
             }
-            continue;
         }
-        let mut forced: Vec<usize> = Vec::new();
-        let mut is_forced = vec![false; rs.n];
-        for p in 0..rs.n {
-            let j = p * c_n + c;
-            let mut v = received[j] ^ mask[j];
-            let mut cf = byte_conf[j];
-            if p < rs.k && j >= t_len {
-                v = 0; // known zero fill
-                cf = f32::INFINITY;
-            } else if forced_erasures.is_some_and(|f| f[j] != 0) {
-                forced.push(p);
-                is_forced[p] = true;
-            }
-            cw[p] = v;
-            conf[p] = cf;
-        }
-        if forced.len() > max_erasures {
-            failed += 1;
-            if failed >= max_failures {
-                return Some(StreamDecodeResult {
-                    payload: None,
-                    ok,
-                    stream,
-                    failed,
-                });
-            }
-            continue;
-        }
-        let mut order: Vec<usize> = (0..rs.n).filter(|&p| !is_forced[p]).collect();
-        order.sort_by(|&a, &b| js_cmp(conf[a], conf[b]));
-        let mut out: Option<Vec<u8>> = None;
-        let mut erased: Vec<usize> = Vec::new();
-        for &extra in &ERASURE_LADDER {
-            erased.clear();
-            erased.extend_from_slice(&forced);
-            erased.extend_from_slice(&order[..extra.min(order.len())]);
-            if erased.len() > max_erasures - RS_SAFETY_MARGIN {
-                break;
-            }
-            let Some(cand) = rs.decode(&cw, &erased) else {
-                continue;
-            };
-            // Miscorrection guard: accept only when 2e + f leaves RS_SAFETY_MARGIN parity symbols unused, where e
-            // counts corrected positions outside the erasures. Decoding at the full radius n − k would "correct"
-            // any word.
-            if !rs.encode_into(&cand, &mut enc) {
-                continue;
-            }
-            let mut erased_set = vec![false; rs.n];
-            for &e in &erased {
-                erased_set[e] = true;
-            }
-            let errors = (0..rs.n)
-                .filter(|&p| !erased_set[p] && enc[p] != cw[p])
-                .count();
-            if 2 * errors + erased.len() > max_erasures - RS_SAFETY_MARGIN {
-                continue;
-            }
-            out = Some(cand);
-            break;
-        }
-        let Some(out) = out else {
-            failed += 1;
-            if failed >= max_failures {
-                return Some(StreamDecodeResult {
-                    payload: None,
-                    ok,
-                    stream,
-                    failed,
-                });
-            }
-            continue;
-        };
-        ok[c] = 1;
-        for p in 0..rs.n {
-            let j = p * c_n + c;
-            stream[j] = enc[p] ^ mask[j];
-            if p < rs.k && j < t_len {
-                payload[j] = out[p];
-            }
-        }
+        c0 = c1;
     }
     Some(StreamDecodeResult {
         payload: (failed == 0).then_some(payload),
@@ -353,6 +323,105 @@ pub fn decode_stream(
         stream,
         failed,
     })
+}
+
+enum CodewordResult {
+    /// Taken from `known` (or not decoded in this batch).
+    Known,
+    Failed,
+    /// The decoded message and its re-encoded codeword.
+    Decoded {
+        out: Vec<u8>,
+        enc: Vec<u8>,
+    },
+}
+
+struct CodewordScratch {
+    cw: Vec<u8>,
+    conf: Vec<f32>,
+    enc: Vec<u8>,
+    erased_set: Vec<bool>,
+}
+
+impl CodewordScratch {
+    fn new(n: usize) -> Self {
+        Self {
+            cw: vec![0u8; n],
+            conf: vec![0f32; n],
+            enc: vec![0u8; n],
+            erased_set: vec![false; n],
+        }
+    }
+}
+
+/// Decodes codeword `c` of the stream with the erasure ladder and the miscorrection guard.
+fn decode_codeword(
+    rs: &ReedSolomon,
+    c: usize,
+    c_n: usize,
+    t_len: usize,
+    received: &[u8],
+    mask: &[u8],
+    byte_conf: &[f32],
+    forced_erasures: Option<&[u8]>,
+    sc: &mut CodewordScratch,
+) -> CodewordResult {
+    let max_erasures = rs.n - rs.k;
+    let mut forced: Vec<usize> = Vec::new();
+    let mut is_forced = vec![false; rs.n];
+    for (p, fp) in is_forced.iter_mut().enumerate() {
+        let j = p * c_n + c;
+        let mut v = received[j] ^ mask[j];
+        let mut cf = byte_conf[j];
+        if p < rs.k && j >= t_len {
+            v = 0; // known zero fill
+            cf = f32::INFINITY;
+        } else if forced_erasures.is_some_and(|f| f[j] != 0) {
+            forced.push(p);
+            *fp = true;
+        }
+        sc.cw[p] = v;
+        sc.conf[p] = cf;
+    }
+    if forced.len() > max_erasures {
+        return CodewordResult::Failed;
+    }
+    let conf = &sc.conf;
+    let mut order: Vec<usize> = (0..rs.n).filter(|&p| !is_forced[p]).collect();
+    order.sort_by(|&a, &b| js_cmp(conf[a], conf[b]));
+    let mut erased: Vec<usize> = Vec::new();
+    for &extra in &ERASURE_LADDER {
+        erased.clear();
+        erased.extend_from_slice(&forced);
+        erased.extend_from_slice(&order[..extra.min(order.len())]);
+        if erased.len() > max_erasures - RS_SAFETY_MARGIN {
+            break;
+        }
+        let Some(cand) = rs.decode(&sc.cw, &erased) else {
+            continue;
+        };
+        // Miscorrection guard: accept only when 2e + f leaves RS_SAFETY_MARGIN parity symbols unused, where e
+        // counts corrected positions outside the erasures. Decoding at the full radius n − k would "correct"
+        // any word.
+        if !rs.encode_into(&cand, &mut sc.enc) {
+            continue;
+        }
+        sc.erased_set.fill(false);
+        for &e in &erased {
+            sc.erased_set[e] = true;
+        }
+        let errors = (0..rs.n)
+            .filter(|&p| !sc.erased_set[p] && sc.enc[p] != sc.cw[p])
+            .count();
+        if 2 * errors + erased.len() > max_erasures - RS_SAFETY_MARGIN {
+            continue;
+        }
+        return CodewordResult::Decoded {
+            out: cand,
+            enc: sc.enc.clone(),
+        };
+    }
+    CodewordResult::Failed
 }
 
 /// Cell values (permutation order, used cells) implied by a stream.

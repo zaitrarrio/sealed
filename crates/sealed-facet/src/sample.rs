@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use crate::homography::project;
 use crate::model::SAMPLE_OFFSETS;
 use crate::palette::srgb_to_linear_8;
+use crate::parallel::{par_rows_pair, parts_for};
 use crate::types::{Homography, RgbaImage};
 
 /// Length of a [`ChannelLut`]: three channels × 256 codes.
@@ -94,17 +95,79 @@ pub fn sample_cells(
     {
         return None;
     }
-    let wf = w_px as f64;
-    let hf = h_px as f64;
-    let [h0, h1, h2, h3, h4, h5, h6, h7, h8] = *h;
-    let count = cells.map_or(total, <[u32]>::len);
-    for k in 0..count {
-        let c = cells.map_or(k, |cells| cells[k] as usize);
+    let sampler = CellSampler { img, h: *h, n, lut };
+    match cells {
+        Some(cells) => {
+            for &c in cells {
+                let c = c as usize;
+                let mut acc = [0f64; 12];
+                if sampler.sample(c, &mut acc) {
+                    valid[c] = 1;
+                    store(&mut feat[c * 12..c * 12 + 12], &acc);
+                }
+            }
+        }
+        None => {
+            // Whole grid: cell rows are independent, so they are split across the worker threads.
+            let parts = parts_for(n, 4);
+            par_rows_pair(
+                &mut feat,
+                n * 12,
+                &mut valid,
+                n,
+                1,
+                parts,
+                |y0, frows, vrows| {
+                    for (k, (f, v)) in frows.chunks_exact_mut(12).zip(vrows.iter_mut()).enumerate()
+                    {
+                        let c = y0 * n + k;
+                        let mut acc = [0f64; 12];
+                        if sampler.sample(c, &mut acc) {
+                            *v = 1;
+                            store(f, &acc);
+                        }
+                    }
+                },
+            );
+        }
+    }
+    Some(CellSamples { n, feat, valid })
+}
+
+#[inline]
+fn store(feat: &mut [f32], acc: &[f64; 12]) {
+    for (f, a) in feat.iter_mut().zip(acc) {
+        *f = (a / (PER_HALF * PER_HALF) as f64) as f32;
+    }
+}
+
+struct CellSampler<'a> {
+    img: &'a RgbaImage<'a>,
+    h: Homography,
+    n: usize,
+    lut: &'a ChannelLut,
+}
+
+impl CellSampler<'_> {
+    /// Accumulates the 3 × 3 samples of every quadrant of cell `c` into `acc` (`[q * 3 + ch]`); false when a
+    /// sample fell outside the image (the cell is then invalid).
+    #[inline]
+    fn sample(&self, c: usize, acc: &mut [f64; 12]) -> bool {
+        let n = self.n;
+        let img = self.img;
+        let (wf, hf) = (img.width as f64, img.height as f64);
+        let stride = img.stride;
+        let d = img.data;
+        // One 256-entry table per channel: a u8 code then indexes it without a bounds check.
+        let luts: [&[f32; 256]; 3] = std::array::from_fn(|ch| {
+            self.lut[ch * 256..ch * 256 + 256]
+                .try_into()
+                .expect("256 codes per channel")
+        });
+        let [h0, h1, h2, h3, h4, h5, h6, h7, h8] = self.h;
         let cx = c % n;
         let cy = c / n;
-        let mut acc = [0f64; 12];
-        let mut ok = true;
-        'rows: for (sy, &oy) in SUB.iter().enumerate() {
+        for (sy, &oy) in SUB.iter().enumerate() {
             let gy = cy as f64 + 0.5 + oy;
             let qy = if sy < PER_HALF { 0 } else { 1 };
             for (sx, &ox) in SUB.iter().enumerate() {
@@ -112,15 +175,13 @@ pub fn sample_cells(
                 let qx = if sx < PER_HALF { 0 } else { 1 };
                 let w = h6 * gx + h7 * gy + h8;
                 if w.is_nan() || w <= 1e-12 {
-                    ok = false;
-                    break 'rows;
+                    return false;
                 }
                 let x = (h0 * gx + h1 * gy + h2) / w - 0.5;
                 let y = (h3 * gx + h4 * gy + h5) / w - 0.5;
                 let inside = x >= 0.0 && y >= 0.0 && x < wf - 1.0 && y < hf - 1.0;
                 if !inside {
-                    ok = false;
-                    break 'rows;
+                    return false;
                 }
                 let x0 = x as usize;
                 let y0 = y as usize;
@@ -135,26 +196,19 @@ pub fn sample_cells(
                 let p01 = p00 + stride;
                 let p11 = p01 + 4;
                 let o = (qy * 2 + qx) * 3;
-                for ch in 0..3 {
-                    let base = ch * 256;
+                let (q00, q10) = (&d[p00..p00 + 3], &d[p10..p10 + 3]);
+                let (q01, q11) = (&d[p01..p01 + 3], &d[p11..p11 + 3]);
+                for (ch, lut) in luts.iter().enumerate() {
                     acc[o + ch] = acc[o + ch]
-                        + w00 * lut[base + d[p00 + ch] as usize] as f64
-                        + w10 * lut[base + d[p10 + ch] as usize] as f64
-                        + w01 * lut[base + d[p01 + ch] as usize] as f64
-                        + w11 * lut[base + d[p11 + ch] as usize] as f64;
+                        + w00 * lut[q00[ch] as usize] as f64
+                        + w10 * lut[q10[ch] as usize] as f64
+                        + w01 * lut[q01[ch] as usize] as f64
+                        + w11 * lut[q11[ch] as usize] as f64;
                 }
             }
         }
-        if !ok {
-            continue;
-        }
-        valid[c] = 1;
-        let fo = c * 12;
-        for (i, a) in acc.iter().enumerate() {
-            feat[fo + i] = (a / (PER_HALF * PER_HALF) as f64) as f32;
-        }
+        true
     }
-    Some(CellSamples { n, feat, valid })
 }
 
 /// Image position of a grid point (convenience re-export for UIs drawing overlays).

@@ -20,6 +20,7 @@
 use crate::homography::{homography_from_4, project};
 use crate::layout::{ANCHOR_CELLS, ANCHOR_INTERIOR_RUNS, Corner};
 use crate::palette::srgb_to_linear_8;
+use crate::parallel::{par_rows, parts_for};
 use crate::types::{Homography, LumaPlane, RgbaImage, TIERS};
 
 /// A candidate set of the four anchor centers.
@@ -122,16 +123,21 @@ pub fn linear_luma_into(img: &RgbaImage<'_>, out: &mut Vec<f32>) -> bool {
     }
     let (w, h) = (img.width, img.height);
     out.resize(w * h, 0.0);
-    let t = srgb_to_linear_8();
-    for y in 0..h {
-        let row = &img.data[y * img.stride..y * img.stride + w * 4];
-        let dst = &mut out[y * w..(y + 1) * w];
-        for (o, p) in dst.iter_mut().zip(row.chunks_exact(4)) {
-            *o = (0.2126 * t[p[0] as usize] as f64
-                + 0.7152 * t[p[1] as usize] as f64
-                + 0.0722 * t[p[2] as usize] as f64) as f32;
-        }
+    if w == 0 {
+        return true;
     }
+    let t = srgb_to_linear_8();
+    par_rows(out, w, 1, parts_for(h, 64), |y0, rows| {
+        for (i, dst) in rows.chunks_exact_mut(w).enumerate() {
+            let y = y0 + i;
+            let row = &img.data[y * img.stride..y * img.stride + w * 4];
+            for (o, p) in dst.iter_mut().zip(row.chunks_exact(4)) {
+                *o = (0.2126 * t[p[0] as usize] as f64
+                    + 0.7152 * t[p[1] as usize] as f64
+                    + 0.0722 * t[p[2] as usize] as f64) as f32;
+            }
+        }
+    });
     true
 }
 
@@ -286,8 +292,15 @@ fn fit_interior(r: &Runs, first: usize, t: &[u32]) -> Option<Fit> {
     Some(Fit { u, err: max, sum })
 }
 
-/// Finds anchor-interior patterns in a run-length encoded line. `luma` is the line's luma (indexed like the runs).
-fn find_matches(r: &Runs, luma: &[f32], white: f64, max_unit: f64, out: &mut Vec<Match>) {
+/// Finds anchor-interior patterns in a run-length encoded line. `luma(i)` is the line's luma at sample i (indexed
+/// like the runs); it is read only along wide dark runs, so lines gathered across the image fetch it lazily.
+fn find_matches<L: Fn(usize) -> f32>(
+    r: &Runs,
+    luma: L,
+    white: f64,
+    max_unit: f64,
+    out: &mut Vec<Match>,
+) {
     let cnt = r.count;
     let mut i = 0usize;
     while i + 2 < cnt {
@@ -346,8 +359,8 @@ fn find_matches(r: &Runs, luma: &[f32], white: f64, max_unit: f64, out: &mut Vec
                     continue;
                 }
                 let mut acc = 0.0f64;
-                for &v in luma.iter().skip(s).take(l) {
-                    acc += v as f64;
+                for i in s..s + l {
+                    acc += luma(i) as f64;
                 }
                 if acc / l as f64 > 0.3 * white {
                     ok = false;
@@ -368,26 +381,66 @@ fn find_matches(r: &Runs, luma: &[f32], white: f64, max_unit: f64, out: &mut Vec
     }
 }
 
+/// True when `v` is a finite multiple of 2⁻²⁰ below 2³⁰ in magnitude, so `v ± t` is exact for integers |t| < 2³⁰.
+#[inline]
+fn on_grid(v: f64) -> bool {
+    const SCALE: f64 = 1048576.0; // 2²⁰
+    v.abs() < 1073741824.0 && {
+        let s = v * SCALE;
+        s == s as i64 as f64
+    }
+}
+
+/// True for the line directions −1, 0, 1 (exactly).
+#[inline]
+fn unit_step(d: f64) -> bool {
+    d == 0.0 || d == 1.0 || d == -1.0
+}
+
 /// Scratch buffers of the line cross-checks.
 struct LineScratch {
     runs: Runs,
     bin: Vec<u8>,
-    luma: Vec<f32>,
+    /// Pixel index of every gathered sample (for the lazy luma reads).
+    pix: Vec<u32>,
     matches: Vec<Match>,
 }
 
+impl LineScratch {
+    fn new() -> Self {
+        Self {
+            runs: Runs::new(512),
+            bin: vec![0; 512],
+            pix: vec![0; 512],
+            matches: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 struct LineHit {
     offset: f64,
     unit: f64,
+}
+
+/// Row-scan results of one image row: its pattern matches and the vertical cross-check of each.
+#[derive(Default)]
+struct RowWork {
+    matches: Vec<Match>,
+    vertical: Vec<Option<LineHit>>,
 }
 
 /// Samples the binarized image along the line through (x, y) with direction (dx, dy) ∈ {(1,0), (0,1), (1,±1)},
 /// one sample per step, and returns the offset (in steps from (x, y)) of the center of the matching pattern of the
 /// same corner type whose interior contains (x, y). Along a diagonal, one step changes the Chebyshev distance
 /// from an axis-aligned anchor's center by one pixel, so run lengths in steps compare directly with `unit`.
+///
+/// `bin_t` is the binary plane transposed (`[x * h + y]`): vertical lines, by far the most frequent (one per row
+/// match), read it contiguously instead of striding through `bin`.
 fn cross_check(
     sc: &mut LineScratch,
     bin: &[u8],
+    bin_t: &[u8],
     luma: &[f32],
     w: usize,
     h: usize,
@@ -408,15 +461,36 @@ fn cross_check(
     let len = (2 * span_i + 1) as usize;
     if sc.bin.len() < len {
         sc.bin = vec![0; len];
-        sc.luma = vec![0.0; len];
+        sc.pix = vec![0; len];
     }
     let mut first: Option<usize> = None;
     let mut count = 0usize;
+    let vertical = dx == 0.0 && dy == 1.0;
+    // `floor(x + d·t)` for integer steps t is `floor(x) + d·t` whenever the sum is exact: x on a 2⁻²⁰ grid and
+    // small, d ∈ {−1, 0, 1} (the line directions used here). That path needs no `floor` call per sample
+    // (a libm call on targets without a rounding instruction); anything else takes the literal route.
+    let exact = on_grid(x) && on_grid(y) && unit_step(dx) && unit_step(dy);
+    let (ix, iy, dxi, dyi) = if exact {
+        (x.floor() as i64, y.floor() as i64, dx as i64, dy as i64)
+    } else {
+        (0, 0, 0, 0)
+    };
+    let (wi, hi) = (w as i64, h as i64);
     for i in 0..len {
-        let t = (i as i64 - span_i) as f64;
-        let px = (x + dx * t).floor();
-        let py = (y + dy * t).floor();
-        if !(px >= 0.0 && py >= 0.0 && px < w as f64 && py < h as f64) {
+        let t = i as i64 - span_i;
+        let (px, py) = if exact {
+            (ix + dxi * t, iy + dyi * t)
+        } else {
+            let tf = t as f64;
+            let px = (x + dx * tf).floor();
+            let py = (y + dy * tf).floor();
+            if !(px >= 0.0 && py >= 0.0 && px < w as f64 && py < h as f64) {
+                (-1, -1)
+            } else {
+                (px as i64, py as i64)
+            }
+        };
+        if !(px >= 0 && py >= 0 && px < wi && py < hi) {
             if first.is_some() {
                 break;
             }
@@ -425,9 +499,14 @@ fn cross_check(
         if first.is_none() {
             first = Some(i);
         }
-        let idx = py as usize * w + px as usize;
-        sc.bin[count] = bin[idx];
-        sc.luma[count] = luma[idx];
+        let (px, py) = (px as usize, py as usize);
+        let idx = py * w + px;
+        sc.bin[count] = if vertical {
+            bin_t[px * h + py]
+        } else {
+            bin[idx]
+        };
+        sc.pix[count] = idx as u32;
         count += 1;
     }
     let first = first?;
@@ -436,9 +515,10 @@ fn cross_check(
     }
     sc.runs.encode(&sc.bin, 0, 1, count);
     sc.matches.clear();
+    let pix = &sc.pix[..count];
     find_matches(
         &sc.runs,
-        &sc.luma[..count],
+        |i| luma[pix[i] as usize],
         white,
         max_unit,
         &mut sc.matches,
@@ -473,10 +553,10 @@ fn cross_check(
 /// `detect` call (its buffer is reused by the next call).
 pub struct GridDetector {
     bin_buf: Vec<u8>,
+    /// `bin_buf` transposed (`[x * h + y]`), for the vertical line scans.
+    bin_t: Vec<u8>,
     integral: Vec<f64>,
-    row_runs: Runs,
     line: LineScratch,
-    row_matches: Vec<Match>,
     /// Luma plane of the most recent `detect` call.
     pub luma: Option<LumaPlane>,
 }
@@ -491,15 +571,9 @@ impl GridDetector {
     pub fn new() -> Self {
         Self {
             bin_buf: Vec::new(),
+            bin_t: Vec::new(),
             integral: Vec::new(),
-            row_runs: Runs::new(2048),
-            line: LineScratch {
-                runs: Runs::new(512),
-                bin: vec![0; 512],
-                luma: vec![0.0; 512],
-                matches: Vec::new(),
-            },
-            row_matches: Vec::new(),
+            line: LineScratch::new(),
             luma: None,
         }
     }
@@ -521,6 +595,9 @@ impl GridDetector {
         }
         if self.bin_buf.len() != n {
             self.bin_buf.resize(n, 0);
+        }
+        if self.bin_t.len() != n {
+            self.bin_t.resize(n, 0);
         }
         if self.integral.len() != (w + 1) * (h + 1) {
             self.integral = vec![0.0; (w + 1) * (h + 1)];
@@ -550,6 +627,7 @@ impl GridDetector {
         }
         for radius in radii {
             self.binarize(radius, white);
+            self.transpose_bin();
             let sets = self.scan(white);
             if !sets.is_empty() {
                 return sets;
@@ -566,25 +644,42 @@ impl GridDetector {
         let h = luma.height;
         let ld = &luma.data[..];
         let bin = &self.bin_buf[..];
+        let bin_t = &self.bin_t[..];
         let max_unit = w.max(h) as f64 / 80.0;
+        // Per row, the pattern matches and their vertical cross-checks depend only on the binary plane, so they
+        // are computed for all rows first (split across the worker threads); the sequential walk below then
+        // replays the reference control flow (hit limit, cluster saturation) over those results.
+        let mut work: Vec<RowWork> = (0..h).map(|_| RowWork::default()).collect();
+        let parts = parts_for(h, 32);
+        par_rows(&mut work, 1, 1, parts, |y0, rows| {
+            let mut runs = Runs::new(w + 1);
+            let mut line = LineScratch::new();
+            for (i, rw) in rows.iter_mut().enumerate() {
+                let y = y0 + i;
+                runs.encode(bin, y * w, 1, w);
+                let row_luma = &ld[y * w..y * w + w];
+                find_matches(&runs, |i| row_luma[i], white, max_unit, &mut rw.matches);
+                let yc = y as f64 + 0.5;
+                rw.vertical = rw
+                    .matches
+                    .iter()
+                    .map(|m| {
+                        let cx = (m.a + m.b) as f64 / 2.0;
+                        cross_check(
+                            &mut line, bin, bin_t, ld, w, h, cx, yc, 0.0, 1.0, m.unit, m.corner,
+                            white, max_unit,
+                        )
+                    })
+                    .collect();
+            }
+        });
         let mut clusters: Vec<Cluster> = Vec::new();
         let mut processed = 0usize;
-        let row_runs = &mut self.row_runs;
-        let row_matches = &mut self.row_matches;
         let line = &mut self.line;
         let mut y = 0usize;
         while y < h && processed < MAX_ROW_HITS {
-            row_runs.encode(bin, y * w, 1, w);
-            row_matches.clear();
-            let row_off = y * w;
-            find_matches(
-                row_runs,
-                &ld[row_off..row_off + w],
-                white,
-                max_unit,
-                row_matches,
-            );
-            for m in row_matches.iter() {
+            let rw = &work[y];
+            for (m, v) in rw.matches.iter().zip(&rw.vertical) {
                 processed += 1;
                 if processed > MAX_ROW_HITS {
                     break;
@@ -595,14 +690,12 @@ impl GridDetector {
                 if near_saturated(&clusters, m.corner, cx, yc) {
                     continue;
                 }
-                let Some(v) = cross_check(
-                    line, bin, ld, w, h, cx, yc, 0.0, 1.0, m.unit, m.corner, white, max_unit,
-                ) else {
+                let Some(v) = v else {
                     continue;
                 };
                 let cy = yc + v.offset;
                 let Some(h2) = cross_check(
-                    line, bin, ld, w, h, cx, cy, 1.0, 0.0, m.unit, m.corner, white, max_unit,
+                    line, bin, bin_t, ld, w, h, cx, cy, 1.0, 0.0, m.unit, m.corner, white, max_unit,
                 ) else {
                     continue;
                 };
@@ -610,14 +703,15 @@ impl GridDetector {
                 // Both diagonals through the center: along any line through the center of concentric squares the run
                 // ratios hold, while glyph data almost never repeats the pattern in all four directions.
                 if cross_check(
-                    line, bin, ld, w, h, fx, cy, 1.0, 1.0, m.unit, m.corner, white, max_unit,
+                    line, bin, bin_t, ld, w, h, fx, cy, 1.0, 1.0, m.unit, m.corner, white, max_unit,
                 )
                 .is_none()
                 {
                     continue;
                 }
                 if cross_check(
-                    line, bin, ld, w, h, fx, cy, 1.0, -1.0, m.unit, m.corner, white, max_unit,
+                    line, bin, bin_t, ld, w, h, fx, cy, 1.0, -1.0, m.unit, m.corner, white,
+                    max_unit,
                 )
                 .is_none()
                 {
@@ -634,6 +728,28 @@ impl GridDetector {
             y += 1;
         }
         select_corner_sets(&clusters)
+    }
+
+    /// `bin_t = bin_bufᵀ`, in 64 × 64 tiles.
+    fn transpose_bin(&mut self) {
+        let Some(l) = self.luma.as_ref() else {
+            return;
+        };
+        let (w, h) = (l.width, l.height);
+        let (bin, bin_t) = (&self.bin_buf[..w * h], &mut self.bin_t[..w * h]);
+        const T: usize = 64;
+        for y0 in (0..h).step_by(T) {
+            let y1 = h.min(y0 + T);
+            for x0 in (0..w).step_by(T) {
+                let x1 = w.min(x0 + T);
+                for y in y0..y1 {
+                    let row = &bin[y * w + x0..y * w + x1];
+                    for (x, &v) in (x0..x1).zip(row) {
+                        bin_t[x * h + y] = v;
+                    }
+                }
+            }
+        }
     }
 
     /// Summed-area table of the luma plane.
@@ -674,18 +790,24 @@ impl GridDetector {
         let w1 = w + 1;
         let floor = 0.12 * white;
         let bias = 0.04 * white;
-        for y in 0..h {
-            let y0 = y.saturating_sub(r);
-            let y1 = h.min(y + r + 1);
-            for x in 0..w {
-                let x0 = x.saturating_sub(r);
-                let x1 = w.min(x + r + 1);
-                let sum = s[y1 * w1 + x1] - s[y0 * w1 + x1] - s[y1 * w1 + x0] + s[y0 * w1 + x0];
-                let mean = sum / ((x1 - x0) * (y1 - y0)) as f64;
-                let v = d[y * w + x] as f64;
-                bin[y * w + x] = u8::from(v > mean - bias && v > floor);
-            }
+        if w == 0 {
+            return;
         }
+        par_rows(&mut bin[..w * h], w, 1, parts_for(h, 64), |ys, rows| {
+            for (i, brow) in rows.chunks_exact_mut(w).enumerate() {
+                let y = ys + i;
+                let y0 = y.saturating_sub(r);
+                let y1 = h.min(y + r + 1);
+                for (x, b) in brow.iter_mut().enumerate() {
+                    let x0 = x.saturating_sub(r);
+                    let x1 = w.min(x + r + 1);
+                    let sum = s[y1 * w1 + x1] - s[y0 * w1 + x1] - s[y1 * w1 + x0] + s[y0 * w1 + x0];
+                    let mean = sum / ((x1 - x0) * (y1 - y0)) as f64;
+                    let v = d[y * w + x] as f64;
+                    *b = u8::from(v > mean - bias && v > floor);
+                }
+            }
+        });
     }
 }
 

@@ -16,4 +16,6 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 
 [features]
-default = []
+default = ["threads"]
+# Scoped worker threads for the data detector (never used on wasm32; the wasm build passes --no-default-features).
+threads = []
