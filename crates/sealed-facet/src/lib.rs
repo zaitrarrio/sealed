@@ -30,4 +30,6 @@ pub mod refine;
 pub mod rs;
 pub mod sample;
 pub mod types;
+pub mod receiver;
+pub mod ffi;
 pub mod vamp;

@@ -111,7 +111,7 @@ pub fn tier_spec(t: GridTier) -> &'static TierSpec {
     &TIERS[t as usize - 1]
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FrameType {
     Calibration,
     Descriptor,
