@@ -13,6 +13,7 @@
 #![deny(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
 
+pub mod detect;
 pub mod gf256;
 pub mod glyphs;
 pub mod grid;
@@ -22,6 +23,7 @@ pub mod layout;
 pub mod model;
 pub mod palette;
 pub mod random;
+pub mod refine;
 pub mod rs;
 pub mod sample;
 pub mod types;
