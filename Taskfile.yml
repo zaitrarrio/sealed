@@ -62,6 +62,16 @@ tasks:
     cmds:
       - bash tools/build-facet-wasm.sh
 
+  build:facet-ios:
+    desc: Cross-compile the native grid decoder into an xcframework (macOS with Xcode)
+    cmds:
+      - bash tools/build-facet-native.sh ios
+
+  build:facet-android:
+    desc: Cross-compile the native grid decoder into jniLibs (needs cargo-ndk and the Android NDK)
+    cmds:
+      - bash tools/build-facet-native.sh android
+
   fixtures:grid:
     desc: Generate grid-decoder parity fixtures (simulated captures with the JavaScript decoder's stage outputs)
     dir: packages/core
