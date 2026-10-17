@@ -17,8 +17,14 @@ export interface OpticalMeasurement {
 
 export const DEFAULT_TIER: Tier = 0;
 
-export function tierForMeasurement(m: OpticalMeasurement | undefined): Tier {
-  if (!m || !Number.isFinite(m.decodeMsPerFrame) || m.decodeMsPerFrame <= 0) return DEFAULT_TIER;
+/**
+ * The tier to offer. With the native decoder (ADR-0023) and no measurement yet, grid tier 1 (its 100 ms frame
+ * interval is within reach of every phone the decoder was measured on); a benchmark measurement of the native
+ * pixel path can raise that to T2/T3 or lower it back to T0. Without the native decoder, only a measurement of
+ * the JavaScript path that keeps up with a tier's frame interval offers it (none does today).
+ */
+export function tierForMeasurement(m: OpticalMeasurement | undefined, nativeAvailable = false): Tier {
+  if (!m || !Number.isFinite(m.decodeMsPerFrame) || m.decodeMsPerFrame <= 0) return nativeAvailable ? 1 : DEFAULT_TIER;
   for (const t of [3, 2, 1] as const) {
     const intervalMs = 1000 / TIERS[t].dataFps;
     if (m.decodeMsPerFrame <= intervalMs && m.captureFps >= TIERS[t].dataFps * 2) return t;

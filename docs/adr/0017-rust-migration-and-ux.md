@@ -11,7 +11,7 @@ ADR-0016 recorded that the first implementation shipped a TypeScript core withou
 1. **Transfer lifecycle** lives in a process-level `TransferSessionStore` (web + mobile). Unmount no longer cancels uploads. Claim secrets are stashed in `sessionStorage`. Completed receives stay on a received-file shelf.
 2. **Web approval** registers a passkey in-flow via `ensurePasskeyThenVerify` when none exists.
 3. **UX** collapses to Send / Receive with automatic mode resolution (`resolveSendMode`) and "Safety code" copy instead of SAS jargon.
-4. **Rust workspace** (`crates/sealed-core`, `sealed-facet`, `sealed-wasm`, `sealed-uniffi`) implements Envelope (zstd), BIP-39 paper keys, FEC, sans-IO protocol machines, and WGSL kernels (`rectify`, `calibrate`, `sample`, `syndrome`) with a CPU fallback oracle.
+4. **Rust workspace** (`crates/sealed-core`, `sealed-facet`; the `sealed-wasm`/`sealed-uniffi` bindings were replaced by a C ABI in ADR-0023) implements Envelope (zstd), BIP-39 paper keys, FEC, sans-IO protocol machines, and WGSL kernels (`rectify`, `calibrate`, `sample`, `syndrome`) with a CPU fallback oracle.
 5. **Spec gaps closed in TS+relay:** BIP-39 paper keys (base32 still decodeable), encrypted contacts sync blob endpoints, one-sided pairing return path.
 
 ## Consequences

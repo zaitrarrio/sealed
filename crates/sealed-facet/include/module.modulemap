@@ -1,0 +1,4 @@
+module SealedFacet {
+  header "sealed_facet.h"
+  export *
+}

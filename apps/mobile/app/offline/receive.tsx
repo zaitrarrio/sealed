@@ -22,6 +22,7 @@ import type { DecodeProgress, DecodeSessionOptions } from "../../src/lib/facet-d
 import { formatBytes } from "../../src/lib/bytes";
 import { deleteReceived, storeOpened, type ReceivedFile } from "../../src/lib/received";
 import { describeSender, type SenderView } from "../../src/lib/sender-check";
+import { nativeFacetAvailable } from "../../src/lib/native-facet";
 import { session, useSession } from "../../src/lib/session";
 import { useTorchSignal } from "../../src/lib/torch-signal";
 import { Button, Card, CheckCode, Disclosure, Notice, P, Progress, Row, Screen, Segmented, Spinner, Title, errorMessage, fonts } from "../../src/ui/kit";
@@ -32,7 +33,7 @@ const NOOP = () => undefined;
 
 export default function ReceiveOffline() {
   const s = useSession();
-  const [tier, setTier] = useState<Tier>(() => tierForMeasurement(s.settings.opticalMeasurement));
+  const [tier, setTier] = useState<Tier>(() => tierForMeasurement(s.settings.opticalMeasurement, nativeFacetAvailable()));
   const [offer, setOffer] = useState<{ code: string; nonce: Uint8Array; tier: Tier } | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [update, setUpdate] = useState<DecodeProgress | null>(null);
@@ -114,7 +115,7 @@ export default function ReceiveOffline() {
                 ["3", "T3"],
               ]}
             />
-            <P tone="subtle">T0 is read by the phone's own QR detector and works on every phone. Grid tiers carry more per frame but are decoded in JavaScript here and are experimental; measure them with the Benchmark first.</P>
+            <P tone="subtle">{nativeFacetAvailable() ? "T0 is read by the phone's own QR detector. Grid tiers are decoded by Sealed's native decoder on this phone; the Benchmark measures how fast." : "T0 is read by the phone's own QR detector and works on every phone. Grid tiers carry more per frame but this build decodes them in JavaScript (slow); measure them with the Benchmark first."}</P>
           </Disclosure>
         </View>
       ) : null}

@@ -1,0 +1,3 @@
+# Cross-compiled by tools/build-facet-native.sh (task build:facet-ios / build:facet-android).
+ios/SealedFacet.xcframework/
+android/src/main/jniLibs/

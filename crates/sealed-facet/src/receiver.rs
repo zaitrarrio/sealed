@@ -91,6 +91,8 @@ pub struct GridDecoder {
     fusion: Vec<(FusionKey, FusionStats)>,
     frames: Vec<Vec<u8>>,
     last_pixels_per_cell: f64,
+    /// Repacked RGBA copy of a frame delivered in another layout (`push_format`).
+    rgba: Vec<u8>,
 }
 
 impl GridDecoder {
@@ -110,6 +112,7 @@ impl GridDecoder {
             fusion: Vec::new(),
             frames: Vec::new(),
             last_pixels_per_cell: 0.0,
+            rgba: Vec::new(),
         })
     }
 
@@ -124,6 +127,25 @@ impl GridDecoder {
 
     pub fn pixels_per_cell(&self) -> f32 {
         self.last_pixels_per_cell as f32
+    }
+
+    /// `push` for a frame in any supported pixel layout: BGRA (iOS) and RGB are repacked to RGBA first. Returns
+    /// an empty slice for an inconsistent buffer.
+    pub fn push_format(&mut self, data: &[u8], width: usize, height: usize, stride: usize, format: crate::types::PixelFormat) -> &[Vec<u8>] {
+        if format == crate::types::PixelFormat::Rgba8 && stride >= width * 4 && data.len() >= stride * height {
+            let img = RgbaImage { width, height, stride, data };
+            return self.push(&img);
+        }
+        let mut rgba = std::mem::take(&mut self.rgba);
+        let ok = crate::types::to_rgba(data, width, height, stride, format, &mut rgba);
+        if ok {
+            let img = RgbaImage::new(width, height, &rgba);
+            self.push(&img);
+        } else {
+            self.frames.clear();
+        }
+        self.rgba = rgba;
+        &self.frames
     }
 
     /// Decodes one camera frame. Returns the frames found (also kept in `frames()` until the next push).

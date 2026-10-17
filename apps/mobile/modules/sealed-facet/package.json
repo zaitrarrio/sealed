@@ -1,0 +1,8 @@
+{
+  "name": "sealed-facet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sealed native grid decoder (Rust, ADR-0023) for the phones: camera frames in, Facet frames out",
+  "main": "index.ts",
+  "types": "index.ts"
+}

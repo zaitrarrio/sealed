@@ -4,13 +4,15 @@
  *   codes   (default) the platform QR detector reads each T0 frame and hands its text to FacetDecodeSession.
  *           Nothing is decoded in JavaScript, the code can be anywhere in view at any angle, and the detector
  *           keeps up with the sender's frame rate. This is what every offline transfer uses.
- *   pixels  raw camera frames go to the JavaScript decoder (colour-grid tiers T1–T3; ~0.5 s per frame).
+ *   pixels  raw camera frames go to the native grid decoder when the app was built with it (ADR-0023), else
+ *           to the JavaScript decoder (colour-grid tiers T1–T3; ~0.5 s per frame).
  */
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { RgbaImage } from "@sealed/core";
 import { FacetDecodeSession, type DecodeProgress, type DecodeResult, type DecodeSessionOptions } from "../lib/facet-decode";
+import { createGridDecoder, nativeFormat } from "../lib/native-facet";
 import { CodeCamera } from "./CodeCamera";
-import { PixelCamera } from "./PixelCamera";
+import { PixelCamera, type RawFrame } from "./PixelCamera";
 
 interface CaptureProps {
   options: DecodeSessionOptions;
@@ -80,6 +82,16 @@ function CodeCapture({ options, onProgress, onComplete, onError, overlay, torch 
 
 function PixelCapture({ options, onProgress, onComplete, onError, overlay }: CaptureProps) {
   const { feed, done, reportError } = useDecoder(options, onProgress, onComplete, onError);
+  const native = useMemo(() => createGridDecoder([1, 2, 3]), []);
+  useEffect(() => () => native?.dispose(), [native]);
   const onImage = useCallback((image: RgbaImage, at: number) => feed((s) => s.push(image, at)), [feed]);
-  return <PixelCamera onImage={onImage} active={!done} onError={reportError} {...(overlay ? { overlay } : {})} />;
+  const onRaw = useCallback(
+    (f: RawFrame, at: number) =>
+      feed((s) => {
+        const frames = native ? native.pushRaw(f.data, f.width, f.height, f.bytesPerRow, nativeFormat(f.format)) : [];
+        return s.pushFrameBytes(frames, at);
+      }),
+    [feed, native],
+  );
+  return <PixelCamera onImage={onImage} {...(native ? { onRaw } : {})} active={!done} onError={reportError} {...(overlay ? { overlay } : {})} />;
 }

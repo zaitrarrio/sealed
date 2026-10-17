@@ -47,6 +47,21 @@ a port of the real decoder.
   CI builds the wasm before the web app.
 - Fixtures are tens of MB and generated on demand, not committed.
 
+## Phones
+
+`apps/mobile/modules/sealed-facet` is an Expo module (Swift; Kotlin with a C JNI shim) over the same C ABI.
+`task build:facet-ios` / `build:facet-android` cross-compile the crate into the module (an xcframework with a
+module map; `jniLibs/<abi>/libsealed_facet.so`), both git-ignored; without them the module builds as a stub and
+`nativeFacetAvailable()` is false, so the apps keep the JavaScript path. Camera frames reach the decoder raw
+(BGRA on iOS, RGBA/RGB on Android) through `facet_decoder_push_format`; no pixel conversion happens in
+JavaScript. VisionCamera's frame-processor worklet still copies each frame to the JavaScript thread, where the
+module is called synchronously; moving the call onto the frame thread is a later step if the copy shows up.
+A phone with the decoder offers grid tier 1 by default; a Benchmark run of the native pixel path records the
+measured decode time and raises or lowers the offered tier (`tierForMeasurement`).
+
+The skeleton crates `sealed-wasm` (wasm-bindgen) and `sealed-uniffi` from ADR-0011 are removed: the C ABI
+replaces both bindings.
+
 ## Results (2026-10-17, simulated 1280×960 captures, byte-exact against the JavaScript decoder)
 
 | Path | T1 data frame | T3 data frame |

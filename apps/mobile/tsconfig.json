@@ -24,6 +24,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "modules/sealed-keystore/**/*.ts",
+    "modules/sealed-facet/**/*.ts",
     "test/**/*.ts",
     "app.config.ts",
     "vitest.config.mts"

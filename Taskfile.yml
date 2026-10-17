@@ -52,11 +52,6 @@ tasks:
     cmds:
       - task: build
 
-  build:wasm:
-    desc: Build WebAssembly package for sealed-wasm via wasm-pack
-    cmds:
-      - bash tools/build-wasm.sh
-
   build:facet-wasm:
     desc: Build the native grid decoder to WebAssembly (ADR-0023) into packages/core/wasm
     cmds:
@@ -155,14 +150,15 @@ tasks:
       - pnpm bench:sweep {{.CLI_ARGS}}
 
   test:rust:
-    desc: Rust sealed-core, sealed-facet, and sealed-uniffi unit tests
+    desc: Rust sealed-core and sealed-facet unit tests
     cmds:
-      - cargo test -p sealed-core -p sealed-facet -p sealed-uniffi
+      - cargo test -p sealed-core -p sealed-facet --release
 
   check:wasm-budget:
-    desc: Fail if gzipped WASM exceeds 1.5 MiB (when pkg is present)
+    desc: Fail if the gzipped native grid decoder exceeds 1.5 MiB (builds it first)
     cmds:
-      - bash tools/check-wasm-budget.sh
+      - bash tools/build-facet-wasm.sh
+      - bash tools/check-wasm-budget.sh packages/core/wasm
 
   check:
     desc: Everything CI runs — typecheck, unit tests, rust, web e2e, mobile bundle

@@ -19,7 +19,12 @@
 extern "C" {
 #endif
 
-#define SEALED_FACET_ABI_VERSION 1u
+#define SEALED_FACET_ABI_VERSION 2u
+
+/* Pixel layouts for facet_decoder_push_format. */
+#define SEALED_FACET_RGBA8 0u
+#define SEALED_FACET_BGRA8 1u
+#define SEALED_FACET_RGB8 2u
 
 typedef struct facet_decoder facet_decoder;
 
@@ -31,6 +36,8 @@ facet_decoder *facet_decoder_new(uint32_t tiers_mask);
 void facet_decoder_free(facet_decoder *dec);
 /* Returns the number of frames decoded from this image. */
 uint32_t facet_decoder_push(facet_decoder *dec, const uint8_t *rgba, uint32_t width, uint32_t height, uint32_t stride);
+/* As facet_decoder_push, for a frame in another layout (BGRA on iOS, RGB on some Android devices). */
+uint32_t facet_decoder_push_format(facet_decoder *dec, const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, uint32_t format);
 uint32_t facet_decoder_frame_len(const facet_decoder *dec, uint32_t i);
 /* Copies frame i (header ∥ payload) into out, at most cap bytes; returns the bytes copied. */
 uint32_t facet_decoder_frame_copy(const facet_decoder *dec, uint32_t i, uint8_t *out, uint32_t cap);

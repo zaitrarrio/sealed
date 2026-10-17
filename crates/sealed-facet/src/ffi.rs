@@ -8,9 +8,9 @@
 #![allow(clippy::missing_safety_doc)]
 
 use crate::receiver::GridDecoder;
-use crate::types::RgbaImage;
+use crate::types::{PixelFormat, RgbaImage};
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn facet_abi_version() -> u32 {
@@ -74,6 +74,19 @@ pub unsafe extern "C" fn facet_decoder_push(
         data,
     };
     dec.push(&img).len() as u32
+}
+
+/// `facet_decoder_push` for a frame in another pixel layout: `format` 0 = RGBA, 1 = BGRA, 2 = RGB (3 bytes).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn facet_decoder_push_format(dec: *mut GridDecoder, ptr: *const u8, width: u32, height: u32, stride: u32, format: u32) -> u32 {
+    let Some(fmt) = PixelFormat::from_u32(format) else { return 0 };
+    if dec.is_null() || ptr.is_null() || width == 0 || height == 0 || (stride as usize) < width as usize * fmt.bytes_per_pixel() {
+        return 0;
+    }
+    let len = stride as usize * height as usize;
+    // SAFETY: the host passes a buffer of at least stride × height bytes that outlives this call.
+    let (dec, data) = unsafe { (&mut *dec, std::slice::from_raw_parts(ptr, len)) };
+    dec.push_format(data, width as usize, height as usize, stride as usize, fmt).len() as u32
 }
 
 #[unsafe(no_mangle)]

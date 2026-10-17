@@ -16,7 +16,8 @@ import { TorchWatcher } from "../src/components/TorchWatcher";
 import { TorchPlayer, type TorchMessage } from "@sealed/core";
 import type { LockResult } from "../src/lib/camera-lock";
 import { FacetStream } from "../src/components/FacetStream";
-import { PixelCamera } from "../src/components/PixelCamera";
+import { PixelCamera, type RawFrame } from "../src/components/PixelCamera";
+import { createGridDecoder, nativeFacetAvailable, nativeFormat } from "../src/lib/native-facet";
 import { formatBytes } from "../src/lib/bytes";
 import { session, useSession } from "../src/lib/session";
 import { Button, Card, Notice, P, Progress, Row, Screen, Segmented, Stack, Title, errorMessage, fonts } from "../src/ui/kit";
@@ -205,8 +206,15 @@ function FilmStream() {
     void session.updateSettings({ opticalMeasurement: { captureFps: report.inputsPerSecond, decodeMsPerFrame: report.decodeMsPerFrame, at: Date.now() } });
   }, [running, path, report]);
 
+  const native = useRef<ReturnType<typeof createGridDecoder>>(null);
+  useEffect(() => () => native.current?.dispose(), []);
+
   const start = () => {
     meter.current = new BenchmarkMeter();
+    // Grid tiers through the native decoder when this build has it (ADR-0023).
+    native.current?.dispose();
+    native.current = path === "pixels" ? createGridDecoder([1, 2, 3]) : null;
+    if (native.current) meter.current.useNative(native.current);
     setReport(meter.current.report());
     setCopied(false);
     setRun((n) => n + 1);
@@ -215,6 +223,11 @@ function FilmStream() {
 
   const onCode = useCallback((text: string) => meter.current.pushCode(text), []);
   const onImage = useCallback(async (image: RgbaImage) => meter.current.pushImage(image), []);
+  const onRaw = useCallback(async (f: RawFrame) => {
+    const dec = native.current;
+    if (!dec) return;
+    meter.current.pushRaw(f.data, f.width, f.height, f.bytesPerRow, nativeFormat(f.format));
+  }, []);
 
   const lockLine = lock ? `locked ${lock.locked.join(", ") || "nothing"}${lock.bias !== undefined ? ` · bias ${lock.bias}` : ""}${lock.exposure ? ` · 1/${Math.round(1 / lock.exposure.durationS)} s ISO ${lock.exposure.iso}` : ""}` : "auto focus/exposure";
   const cameraLine = cameraFps ? `camera ${cameraFps} fps (reads cleanly up to ${Math.floor(cameraFps / 2)} frames/s)` : "camera fps unknown";
@@ -232,7 +245,7 @@ function FilmStream() {
         }}
         options={[
           ["codes", "QR (system detector)"],
-          ["pixels", "Grid (JavaScript)"],
+          ["pixels", nativeFacetAvailable() ? "Grid (native)" : "Grid (JavaScript)"],
         ]}
       />
       {!running ? <Button title={report ? "Film again" : "Start filming"} tone="primary" onPress={start} testID="bench-film" /> : null}
@@ -240,7 +253,7 @@ function FilmStream() {
         path === "codes" ? (
           <CodeCamera key={run} onCode={onCode} onLock={setLock} onCameraFps={setCameraFps} torch={torch} overlay={overlay} label="Camera view of the test stream" />
         ) : (
-          <PixelCamera key={run} onImage={onImage} overlay={overlay} label="Camera view of the test stream" />
+          <PixelCamera key={run} onImage={onImage} {...(native.current ? { onRaw } : {})} overlay={overlay} label="Camera view of the test stream" />
         )
       ) : null}
       {running && path === "codes" ? (

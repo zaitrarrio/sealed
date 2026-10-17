@@ -53,6 +53,11 @@ describe("capability tier", () => {
     expect(tierForMeasurement({ captureFps: 120, decodeMsPerFrame: 40 })).toBe(3);
     expect(tierForMeasurement({ captureFps: 12, decodeMsPerFrame: 40 })).toBe(0);
   });
+  it("offers grid tier 1 with the native decoder before any measurement, and follows a measurement after", () => {
+    expect(tierForMeasurement(undefined, true)).toBe(1);
+    expect(tierForMeasurement({ captureFps: 60, decodeMsPerFrame: 60 }, true)).toBe(2);
+    expect(tierForMeasurement({ captureFps: 30, decodeMsPerFrame: 400 }, true)).toBe(0);
+  });
 });
 
 describe("code stash and routing", () => {

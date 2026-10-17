@@ -15,31 +15,41 @@ import { Camera, useCameraDevice, useCameraPermission, useFrameOutput, type Fram
 import { createSynchronizable, scheduleOnRN } from "react-native-worklets";
 import { useAppActive } from "../lib/app-state";
 import { SCREEN_READER_CONSTRAINTS } from "../lib/camera-lock";
-import { isSupportedFormat, toRgba } from "../lib/frame-convert";
+import { isSupportedFormat, toRgba, type RawPixelFormat } from "../lib/frame-convert";
 import { Button, Notice, P, Row } from "../ui/kit";
 
 // Stable references: VisionCamera rebuilds the frame output (and its worklet runtime) when these change.
 const TARGET_RESOLUTION = { width: 1920, height: 1080 } as const;
 const NOOP = () => undefined;
 
+export interface RawFrame {
+  data: Uint8Array;
+  width: number;
+  height: number;
+  bytesPerRow: number;
+  format: RawPixelFormat;
+}
+
 export interface PixelCameraProps {
   /** Receives each processed frame; the next frame is taken only after the returned promise settles. */
   onImage: (image: RgbaImage, at: number) => Promise<void>;
+  /** When set, frames are delivered raw (no RGBA conversion in JavaScript) and `onImage` is not called. */
+  onRaw?: (frame: RawFrame, at: number) => Promise<void>;
   active?: boolean;
   label?: string;
   overlay?: ReactNode;
   onError?: (message: string) => void;
 }
 
-export function PixelCamera({ onImage, active = true, label = "Camera view of the other screen", overlay, onError }: PixelCameraProps) {
+export function PixelCamera({ onImage, onRaw, active = true, label = "Camera view of the other screen", overlay, onError }: PixelCameraProps) {
   const device = useCameraDevice("back");
   const { hasPermission, requestPermission } = useCameraPermission();
   const focused = useIsFocused();
   const appActive = useAppActive();
   const [formatError, setFormatError] = useState<string | null>(null);
   const busy = useMemo(() => createSynchronizable(false), []);
-  const cb = useRef({ onImage, onError });
-  cb.current = { onImage, onError };
+  const cb = useRef({ onImage, onRaw, onError });
+  cb.current = { onImage, onRaw, onError };
 
   useEffect(() => () => busy.setBlocking(true), [busy]);
 
@@ -50,7 +60,8 @@ export function PixelCamera({ onImage, active = true, label = "Camera view of th
           setFormatError(`This camera delivered ${format} frames, which Sealed cannot decode.`);
           return;
         }
-        await cb.current.onImage(toRgba(new Uint8Array(buffer), width, height, bytesPerRow, format), timestamp);
+        if (cb.current.onRaw) await cb.current.onRaw({ data: new Uint8Array(buffer), width, height, bytesPerRow, format }, timestamp);
+        else await cb.current.onImage(toRgba(new Uint8Array(buffer), width, height, bytesPerRow, format), timestamp);
       } catch (e) {
         cb.current.onError?.(e instanceof Error ? e.message : String(e));
       } finally {

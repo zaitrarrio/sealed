@@ -36,12 +36,10 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p sealed-core -p sealed-facet -p sealed-uniffi
-      - name: Facet optical goodput gate (CPU oracle)
-        run: cargo test -p sealed-facet pipeline::tests::cpu_pipeline_advances -- --nocapture
+      - run: cargo test -p sealed-core -p sealed-facet --release
 
-  wasm-budget:
-    name: WASM bundle budget (≤ 1.5 MB gzipped)
+  facet-wasm:
+    name: Native grid decoder → WebAssembly (parity in Node, ≤ 1.5 MB gzipped)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,18 +47,21 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - name: Build sealed-wasm (optional until zstd-wasm lands)
-        continue-on-error: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash tools/build-facet-wasm.sh
+      - run: bash tools/check-wasm-budget.sh packages/core/wasm
+      - name: Grid fixtures + wasm parity and speed test
         run: |
-          wasm-pack build crates/sealed-wasm --target web --out-dir ../../packages/core-wasm/pkg --release || true
-          bash tools/check-wasm-budget.sh packages/core-wasm/pkg || true
-      - name: CPU/native size proxy check
-        run: bash tools/check-rust-liberlease-size.sh
+          pnpm --filter @sealed/core fixtures:grid
+          pnpm --filter @sealed/core exec vitest run test/facet/native.test.ts
 
   keystore-native:
-    name: Native keystore modules (Swift / Kotlin compile)
+    name: Native modules (Swift / Kotlin presence and syntax)
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +82,9 @@ jobs:
             -sdk $(xcrun --show-sdk-path --sdk macosx) \
             -import-objc-header /dev/null 2>&1 | head -50 || true
           echo "Swift sources present; full Secure Enclave exercise requires a device build."
+          find apps/mobile/modules/sealed-facet/ios -name '*.swift' -print
+          xcrun swiftc -typecheck apps/mobile/modules/sealed-facet/ios/*.swift \
+            -sdk $(xcrun --show-sdk-path --sdk macosx) 2>&1 | head -50 || true
       - name: Kotlin keystore presence check
         if: matrix.check == 'kotlin'
         run: |
@@ -88,3 +92,8 @@ jobs:
           test -f apps/mobile/modules/sealed-keystore/android/src/main/java/expo/modules/sealedkeystore/DeviceKeyStore.kt \
             || test -n "$(find apps/mobile/modules/sealed-keystore -name '*.kt' | head -1)"
           echo "Kotlin sources present; full StrongBox exercise requires a device build."
+          find apps/mobile/modules/sealed-facet/android -name '*.kt' -o -name '*.c' | sort
+          test -f apps/mobile/modules/sealed-facet/android/src/main/cpp/jni.c
+          # The JNI shim compiles against the C header with a plain C compiler (no NDK needed for syntax).
+          sudo apt-get install -y -qq default-jdk-headless >/dev/null
+          cc -fsyntax-only -I crates/sealed-facet/include -I "$(dirname "$(dirname "$(readlink -f "$(which javac)")")")/include" -I "$(dirname "$(dirname "$(readlink -f "$(which javac)")")")/include/linux" apps/mobile/modules/sealed-facet/android/src/main/cpp/jni.c

@@ -14,7 +14,7 @@ import { openOpticalEnvelope, prepareBroadcastStream, type QrStreamOptions } fro
 import type { FacetSender } from "./sender";
 import { TIERS } from "./tiers";
 import type { RgbaImage, Tier } from "./types";
-import type { NativeGridDecoder } from "./native";
+import type { GridFrameDecoder, NativePixelFormat } from "./native";
 
 const NAME = /^sealed-bench-(\d{1,10})-(\d{1,9})\.bin$/;
 export const BENCHMARK_SIZES = [16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024] as const;
@@ -111,7 +111,7 @@ export class BenchmarkMeter {
   private error: string | null = null;
   private payloadBytes: number | null = null;
   private finishing: Promise<void> | null = null;
-  private native: NativeGridDecoder | null = null;
+  private native: GridFrameDecoder | null = null;
   private nativeMs: number[] = [];
 
   constructor(private readonly now: () => number = () => (typeof performance !== "undefined" ? performance.now() : Date.now())) {}
@@ -142,8 +142,24 @@ export class BenchmarkMeter {
     });
   }
 
+  /** A raw camera buffer for the native decoder (no RGBA conversion); falls back to `pushImage` semantics without one. */
+  pushRaw(data: Uint8Array, width: number, height: number, stride: number, format: NativePixelFormat): void {
+    const native = this.native;
+    if (!native) return;
+    this.track(() => {
+      const t0 = this.now();
+      const frames = native.pushRaw(data, width, height, stride, format);
+      this.nativeMs.push(this.now() - t0);
+      if (this.nativeMs.length > 120) this.nativeMs.shift();
+      let p = this.receiver.progress;
+      if (frames.length === 0) p = this.receiver.pushFrameBytes(new Uint8Array(0), this.now());
+      for (const f of frames) p = this.receiver.pushFrameBytes(f, this.now());
+      return p;
+    });
+  }
+
   /** Decodes grid tiers with the native module from now on; the receiver keeps QR from images. */
-  useNative(decoder: NativeGridDecoder): void {
+  useNative(decoder: GridFrameDecoder): void {
     this.native = decoder;
     this.receiver.setGridFromImages(false);
   }

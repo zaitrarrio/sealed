@@ -9,6 +9,7 @@
  *   facet_decoder_new(tiers_mask)                        bit t set allows grid tier t (1..3); 0 → null
  *   facet_decoder_free(dec)
  *   facet_decoder_push(dec, ptr, width, height, stride)  RGBA frame → number of frames decoded from it
+ *   facet_decoder_push_format(dec, ptr, w, h, stride, f) same for f: 0 RGBA, 1 BGRA, 2 RGB (3 bytes/pixel)
  *   facet_decoder_frame_len(dec, i)                      length of decoded frame i (header ∥ payload bytes)
  *   facet_decoder_frame_copy(dec, i, out, cap)           copies frame i into out (≤ cap); returns bytes copied
  *   facet_decoder_pixels_per_cell(dec)      (f32)        from the last decoded frame's homography, 0 if none
@@ -18,7 +19,7 @@
  */
 import type { RgbaImage } from "./types";
 
-export const NATIVE_ABI_VERSION = 1;
+export const NATIVE_ABI_VERSION = 2;
 
 export interface NativeExports {
   memory: WebAssembly.Memory;
@@ -28,12 +29,30 @@ export interface NativeExports {
   facet_decoder_new(tiersMask: number): number;
   facet_decoder_free(dec: number): void;
   facet_decoder_push(dec: number, ptr: number, width: number, height: number, stride: number): number;
+  facet_decoder_push_format(dec: number, ptr: number, width: number, height: number, stride: number, format: number): number;
   facet_decoder_frame_len(dec: number, i: number): number;
   facet_decoder_frame_copy(dec: number, i: number, out: number, cap: number): number;
   facet_decoder_pixels_per_cell(dec: number): number;
 }
 
-export class NativeGridDecoder {
+/** Pixel layouts a camera may deliver to `pushRaw`. */
+export type NativePixelFormat = "rgba" | "bgra" | "rgb";
+const FORMAT_CODE: Record<NativePixelFormat, number> = { rgba: 0, bgra: 1, rgb: 2 };
+
+/**
+ * What the apps need from a grid decoder, whichever binary provides it: the WebAssembly module here, or a
+ * phone's native module (apps/mobile/modules/sealed-facet) through the same C ABI.
+ */
+export interface GridFrameDecoder {
+  /** Decodes every readable frame in an RGBA image; returns header ∥ payload bytes per frame. */
+  push(image: RgbaImage): Uint8Array[];
+  /** The same for a raw camera buffer in any supported layout. */
+  pushRaw(data: Uint8Array, width: number, height: number, stride: number, format: NativePixelFormat): Uint8Array[];
+  readonly pixelsPerCell: number;
+  dispose(): void;
+}
+
+export class NativeGridDecoder implements GridFrameDecoder {
   private dec: number;
   private input = { ptr: 0, len: 0 };
   private disposed = false;
@@ -48,19 +67,21 @@ export class NativeGridDecoder {
     if (!this.dec) throw new Error("native decoder: no grid tier allowed");
   }
 
-  /** Decodes every readable frame in a camera image; returns header ∥ payload bytes per frame. */
   push(image: RgbaImage): Uint8Array[] {
+    return this.pushRaw(image.data instanceof Uint8Array ? image.data : new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength), image.width, image.height, image.width * 4, "rgba");
+  }
+
+  pushRaw(data: Uint8Array, width: number, height: number, stride: number, format: NativePixelFormat): Uint8Array[] {
     if (this.disposed) throw new Error("native decoder disposed");
-    const stride = image.width * 4;
-    const len = stride * image.height;
-    if (image.data.length < len) throw new RangeError("image buffer is shorter than width × height × 4");
+    const len = stride * height;
+    if (data.length < len) throw new RangeError("image buffer is shorter than stride × height");
     if (this.input.len < len) {
       if (this.input.ptr) this.x.facet_free(this.input.ptr, this.input.len);
       this.input = { ptr: this.x.facet_alloc(len), len };
       if (!this.input.ptr) throw new Error("native decoder: out of memory");
     }
-    new Uint8Array(this.x.memory.buffer, this.input.ptr, len).set(image.data.subarray(0, len));
-    const count = this.x.facet_decoder_push(this.dec, this.input.ptr, image.width, image.height, stride);
+    new Uint8Array(this.x.memory.buffer, this.input.ptr, len).set(data.subarray(0, len));
+    const count = this.x.facet_decoder_push_format(this.dec, this.input.ptr, width, height, stride, FORMAT_CODE[format]);
     const out: Uint8Array[] = [];
     for (let i = 0; i < count; i++) {
       const n = this.x.facet_decoder_frame_len(this.dec, i);
@@ -108,7 +129,7 @@ export async function loadNativeDecoder(source: BufferSource | Response | Promis
     instance = (await WebAssembly.instantiate(source, imports)).instance;
   }
   const x = instance.exports as unknown as NativeExports;
-  for (const k of ["memory", "facet_abi_version", "facet_alloc", "facet_free", "facet_decoder_new", "facet_decoder_free", "facet_decoder_push", "facet_decoder_frame_len", "facet_decoder_frame_copy", "facet_decoder_pixels_per_cell"] as const) {
+  for (const k of ["memory", "facet_abi_version", "facet_alloc", "facet_free", "facet_decoder_new", "facet_decoder_free", "facet_decoder_push", "facet_decoder_push_format", "facet_decoder_frame_len", "facet_decoder_frame_copy", "facet_decoder_pixels_per_cell"] as const) {
     if (!(k in x)) throw new Error(`native decoder: module lacks ${k}`);
   }
   const v = x.facet_abi_version();

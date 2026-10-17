@@ -30,6 +30,62 @@ impl<'a> RgbaImage<'a> {
     }
 }
 
+/// Pixel layouts a camera may deliver (`facet_decoder_push_format`). The decoder works on RGBA.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum PixelFormat {
+    Rgba8 = 0,
+    /// iOS cameras (`kCVPixelFormatType_32BGRA`).
+    Bgra8 = 1,
+    /// 3 bytes per pixel, no alpha (some Android devices).
+    Rgb8 = 2,
+}
+
+impl PixelFormat {
+    pub fn from_u32(v: u32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Rgba8),
+            1 => Some(Self::Bgra8),
+            2 => Some(Self::Rgb8),
+            _ => None,
+        }
+    }
+    pub fn bytes_per_pixel(self) -> usize {
+        match self {
+            Self::Rgb8 => 3,
+            _ => 4,
+        }
+    }
+}
+
+/// Repacks a frame of any supported layout into a tightly packed RGBA buffer. `data` must hold at least
+/// `stride × height` bytes with `stride ≥ width × bpp`; returns false otherwise.
+pub fn to_rgba(data: &[u8], width: usize, height: usize, stride: usize, format: PixelFormat, out: &mut Vec<u8>) -> bool {
+    let bpp = format.bytes_per_pixel();
+    if width == 0 || height == 0 || stride < width * bpp || data.len() < stride * height {
+        return false;
+    }
+    out.clear();
+    out.reserve(width * height * 4);
+    for y in 0..height {
+        let row = &data[y * stride..y * stride + width * bpp];
+        match format {
+            PixelFormat::Rgba8 => out.extend_from_slice(row),
+            PixelFormat::Bgra8 => {
+                for p in row.chunks_exact(4) {
+                    out.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+                }
+            }
+            PixelFormat::Rgb8 => {
+                for p in row.chunks_exact(3) {
+                    out.extend_from_slice(&[p[0], p[1], p[2], 255]);
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Linear-light luma (Rec. 709 weights over sRGB-decoded channels), 0..1.
 #[derive(Clone, Debug)]
 pub struct LumaPlane {

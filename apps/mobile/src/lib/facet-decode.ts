@@ -71,6 +71,14 @@ export class FacetDecodeSession {
     return this.after(this.receiver.push(image, timestampMs));
   }
 
+  /** Feeds frames decoded by the native grid decoder (ADR-0023) as header ∥ payload bytes. */
+  async pushFrameBytes(frames: readonly Uint8Array[], timestampMs: number): Promise<{ update: DecodeProgress; result?: DecodeResult }> {
+    let p = this.receiver.progress;
+    if (frames.length === 0) p = this.receiver.pushFrameBytes(new Uint8Array(0), timestampMs); // counts the frame for the fps estimate
+    for (const f of frames) p = this.receiver.pushFrameBytes(f, timestampMs);
+    return this.after(p);
+  }
+
   /**
    * Feeds one QR code read by the platform detector (detector path) — the usual way on phones: no pixels are
    * decoded in JavaScript.

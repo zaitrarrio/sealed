@@ -86,6 +86,7 @@
       "reactNativeDirectoryCheck": {
         "exclude": [
           "sealed-keystore",
+          "sealed-facet",
           "react-native-webrtc"
         ]
       }

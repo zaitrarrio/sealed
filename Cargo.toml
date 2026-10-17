@@ -4,8 +4,6 @@ resolver = "3"
 members = [
   "crates/sealed-core",
   "crates/sealed-facet",
-  "crates/sealed-wasm",
-  "crates/sealed-uniffi",
   "tools/fec-vectors",
 ]
 default-members = ["crates/sealed-core", "crates/sealed-facet"]
