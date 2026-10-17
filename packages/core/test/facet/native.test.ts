@@ -31,7 +31,7 @@ function fixtures(tier: number): Fixture[] {
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
 
 describe.skipIf(!ready)("native grid decoder (wasm)", () => {
-  for (const tier of [1, 3]) {
+  for (const tier of [1, 3] as const) {
     it(`T${tier}: decodes the fixture captures to the frames the sender emitted, faster than JavaScript`, async () => {
       const factory = await loadNativeDecoder(readFileSync(wasmPath));
       const native = factory.create([tier]);
