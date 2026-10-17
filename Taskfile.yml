@@ -57,6 +57,22 @@ tasks:
     cmds:
       - bash tools/build-wasm.sh
 
+  build:facet-wasm:
+    desc: Build the native grid decoder to WebAssembly (ADR-0023) into packages/core/wasm
+    cmds:
+      - bash tools/build-facet-wasm.sh
+
+  fixtures:grid:
+    desc: Generate grid-decoder parity fixtures (simulated captures with the JavaScript decoder's stage outputs)
+    dir: packages/core
+    cmds:
+      - pnpm fixtures:grid
+
+  test:facet:
+    desc: Rust grid decoder tests (unit parity vectors + fixture parity when fixtures exist)
+    cmds:
+      - cargo test -p sealed-facet --release
+
   build:relay:
     desc: Build relay Worker to dist/ (alias for relay:build)
     cmds:

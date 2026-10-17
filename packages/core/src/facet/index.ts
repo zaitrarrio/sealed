@@ -32,3 +32,4 @@ export {
 } from "./bench";
 export { BrightnessGate, LossEstimator, RATE_LADDER, ReceiverRateController, TORCH_DONE_MS, TORCH_GAP_MS, TORCH_PULSE_MS, TorchDecoder, TorchPlayer, adaptQrRate, rateIndex, torchSchedule, type QrRate, type TorchMessage, type TorchStep } from "./backchannel";
 export { BACKGROUND as FACET_BACKGROUND, PALETTE_8 as FACET_PALETTE } from "./palette";
+export { NATIVE_ABI_VERSION, NativeGridDecoder, loadNativeDecoder, type NativeDecoderFactory, type NativeExports } from "./native";

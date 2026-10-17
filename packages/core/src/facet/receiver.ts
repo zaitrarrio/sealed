@@ -194,6 +194,42 @@ export class FacetReceiver {
     return this.updateProgress();
   }
 
+  /**
+   * Feeds one frame decoded outside this receiver as header ∥ payload bytes: a grid frame from the native
+   * decoder (ADR-0023), or a T0 frame from a detector that exposes bytes. The header's tier must be one this
+   * receiver allows and the payload must be that tier's symbol size (any T0 profile size for tier 0); the header
+   * CRC binds the two. Calibration frames (empty payload) are counted but carry no symbol. Never throws.
+   */
+  pushFrameBytes(bytes: Uint8Array, timestampMs?: number): ReceiveProgress {
+    this.framesSeen++;
+    if (timestampMs !== undefined && Number.isFinite(timestampMs)) {
+      this.timestamps.push(timestampMs);
+      if (this.timestamps.length > 120) this.timestamps.shift();
+    }
+    if (this.resultBytes) return this.updateProgress();
+    try {
+      if (bytes.length >= HEADER_BYTES) {
+        const header = bytes.subarray(0, HEADER_BYTES);
+        const payload = bytes.subarray(HEADER_BYTES);
+        const h = parseFrameHeader(header);
+        if (h && this.allowed.has(h.tier) && headerCrcMatches(header, payload)) {
+          const sizeOk = h.tier === 0 ? isT0SymbolSize(payload.length) : payload.length === TIERS[h.tier].symbolSize || (h.type === "calibration" && payload.length === 0);
+          if (sizeOk) {
+            if (h.type === "calibration") {
+              if (this.streamMatches(h)) {
+                this.lockStream(h.streamId);
+                this.framesDecoded++;
+              }
+            } else this.accept(h, payload);
+          }
+        }
+      }
+    } catch {
+      // Malformed or adversarial frames must never break the capture loop.
+    }
+    return this.updateProgress();
+  }
+
   // ---------------------------------------------------------------- T0
 
   private tryQr(image: RgbaImage): boolean {

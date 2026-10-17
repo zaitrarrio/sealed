@@ -3,14 +3,17 @@ name = "sealed-facet"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Facet optical codec with wgpu/WGSL decode kernels (ADR-0011)"
+description = "Facet optical codec: native grid-frame decoder (ADR-0023), a port of packages/core/src/facet"
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
-sealed-core = { workspace = true }
-bytemuck = { workspace = true }
-thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
 
 [features]
-default = ["cpu-only"]
-gpu = []
-cpu-only = []
+default = []

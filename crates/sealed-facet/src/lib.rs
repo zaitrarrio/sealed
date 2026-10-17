@@ -1,16 +1,16 @@
-//! Facet optical codec: GPU kernels via wgpu (WebGPU / Metal / Vulkan) and a CPU fallback.
+//! Facet optical codec, native grid-frame decoder (ADR-0023).
 //!
-//! Kernels (ADR-0011): rectification, color calibration, cell sampling, RS syndrome.
+//! A port of the JavaScript decoder in `packages/core/src/facet` (the reference and test oracle), module for
+//! module, so the two stay comparable: the fixtures under `fixtures/` (made by `pnpm fixtures:grid` in
+//! `packages/core`) hold the JavaScript result of every stage for simulated captures.
+//!
+//! Pipeline per camera frame (`receiver::GridDecoder::push`):
+//! luma → detect anchors → coarse homography → sub-cell refine → sample cells → colour-correct → decode header
+//! strips (RS(20,12)) → joint colour/shape ML data detection with interference cancellation → RS(255,207) per
+//! codeword → payload whose header CRC matches. Output is header ∥ payload bytes, which `FacetReceiver` on the
+//! JavaScript side consumes like a QR frame (`pushFrameBytes`).
 
 #![deny(unsafe_code)]
+#![allow(clippy::too_many_arguments)]
 
-pub mod calibrate;
-pub mod cpu;
-pub mod pipeline;
-pub mod rectify;
-pub mod sample;
-pub mod syndrome;
 pub mod types;
-
-pub use pipeline::{FacetDecoder, GpuBackend};
-pub use types::{CapabilityTier, DecodeProgress, RgbaImage};
