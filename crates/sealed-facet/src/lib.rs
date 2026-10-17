@@ -13,4 +13,12 @@
 #![deny(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
 
+pub mod gf256;
+pub mod glyphs;
+pub mod grid;
+pub mod header;
+pub mod layout;
+pub mod palette;
+pub mod random;
+pub mod rs;
 pub mod types;

@@ -11,12 +11,22 @@ pub struct RgbaImage<'a> {
 
 impl<'a> RgbaImage<'a> {
     pub fn new(width: usize, height: usize, data: &'a [u8]) -> Self {
-        Self { width, height, stride: width * 4, data }
+        Self {
+            width,
+            height,
+            stride: width * 4,
+            data,
+        }
     }
     #[inline]
     pub fn px(&self, x: usize, y: usize) -> [u8; 4] {
         let o = y * self.stride + x * 4;
-        [self.data[o], self.data[o + 1], self.data[o + 2], self.data[o + 3]]
+        [
+            self.data[o],
+            self.data[o + 1],
+            self.data[o + 2],
+            self.data[o + 3],
+        ]
     }
 }
 
@@ -65,9 +75,36 @@ pub struct TierSpec {
 }
 
 pub const TIERS: [TierSpec; 3] = [
-    TierSpec { tier: GridTier::T1, grid: 112, bits_per_cell: 6, colors: 4, symbol_size: 7240, rs_n: 255, rs_k: 207, codewords: 35 },
-    TierSpec { tier: GridTier::T2, grid: 112, bits_per_cell: 7, colors: 8, symbol_size: 8280, rs_n: 255, rs_k: 207, codewords: 40 },
-    TierSpec { tier: GridTier::T3, grid: 144, bits_per_cell: 7, colors: 8, symbol_size: 14072, rs_n: 255, rs_k: 207, codewords: 68 },
+    TierSpec {
+        tier: GridTier::T1,
+        grid: 112,
+        bits_per_cell: 6,
+        colors: 4,
+        symbol_size: 7240,
+        rs_n: 255,
+        rs_k: 207,
+        codewords: 35,
+    },
+    TierSpec {
+        tier: GridTier::T2,
+        grid: 112,
+        bits_per_cell: 7,
+        colors: 8,
+        symbol_size: 8280,
+        rs_n: 255,
+        rs_k: 207,
+        codewords: 40,
+    },
+    TierSpec {
+        tier: GridTier::T3,
+        grid: 144,
+        bits_per_cell: 7,
+        colors: 8,
+        symbol_size: 14072,
+        rs_n: 255,
+        rs_k: 207,
+        codewords: 68,
+    },
 ];
 
 pub fn tier_spec(t: GridTier) -> &'static TierSpec {
