@@ -13,7 +13,10 @@
 #![deny(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
 
+pub mod calibrate;
+pub mod decode;
 pub mod detect;
+pub mod equalize;
 pub mod gf256;
 pub mod glyphs;
 pub mod grid;
@@ -27,3 +30,4 @@ pub mod refine;
 pub mod rs;
 pub mod sample;
 pub mod types;
+pub mod vamp;
