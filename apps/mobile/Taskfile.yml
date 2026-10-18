@@ -68,12 +68,12 @@ tasks:
       - npx expo prebuild --clean
 
   ios:
-    desc: Build and run a development build on a connected iPhone (needs Xcode)
+    desc: Run local development build on a connected iPhone (prefer build:eas:ios)
     cmds:
       - npx expo run:ios --device
 
   android:
-    desc: Build and run a development build on a connected Android phone (needs the Android SDK)
+    desc: Run local development build on a connected Android phone (prefer build:eas:android)
     cmds:
       - npx expo run:android --device
 

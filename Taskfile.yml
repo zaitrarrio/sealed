@@ -93,6 +93,21 @@ tasks:
     cmds:
       - task: mobile:build
 
+  build:eas:ios:
+    desc: Trigger an EAS development build for physical iOS devices (alias for mobile:build:eas:ios)
+    cmds:
+      - task: mobile:build:eas:ios
+
+  build:eas:sim:
+    desc: Trigger an EAS development build for iOS Simulator (alias for mobile:build:eas:sim)
+    cmds:
+      - task: mobile:build:eas:sim
+
+  build:eas:android:
+    desc: Trigger an EAS development build for Android (alias for mobile:build:eas:android)
+    cmds:
+      - task: mobile:build:eas:android
+
   clean:
     desc: Complete clean of build outputs, caches, and test artifacts across all packages
     cmds:

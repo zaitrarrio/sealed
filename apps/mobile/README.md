@@ -36,15 +36,13 @@ Expo SDK 57 / React Native 0.86, expo-router, TypeScript. Every mode from the sp
 ## Run
 
 ```sh
-pnpm install                       # from the repo root
-cp apps/mobile/.env.example apps/mobile/.env   # set EXPO_PUBLIC_RELAY_URL to your relay
-pnpm --filter @sealed/relay dev    # local relay on :8787
-cd apps/mobile
-npx expo prebuild                  # generates ios/ and android/ (not committed)
-npx expo run:ios --device          # or: npx expo run:android --device
+pnpm install                                     # from the repo root
+cp apps/mobile/.env.example apps/mobile/.env     # set EXPO_PUBLIC_RELAY_URL to your relay
+pnpm --filter @sealed/mobile build:eas:ios       # always build mobile with EAS (or: build:eas:android)
+pnpm dev                                         # run relay (:8787), web (:5173), and Metro bundler (:8081)
 ```
 
-A development build is required (Expo Go lacks the native modules). Use a physical device: simulators have
+A development build is required (Expo Go lacks the native modules). Always build the development client using EAS Build (`eas build`). Use a physical device: simulators have
 no camera, and the iOS simulator has no Secure Enclave (keys fall back to software and cannot approve).
 
 Universal links need the web origin to serve `/.well-known/apple-app-site-association` and

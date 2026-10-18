@@ -1,0 +1,40 @@
+---
+description: Always build the mobile app with EAS Build instead of local native toolchains
+alwaysApply: true
+---
+
+# Mobile Builds: Always Use EAS Build
+
+When building the native mobile application (`@sealed/mobile`), **always use EAS Build** (`eas-cli`) rather than local Xcode/Android device builds (`expo run:ios`, `expo run:android`, or direct `xcodebuild` device commands).
+
+## Guidelines
+
+1. **Never attempt local native device compilation**:
+   - Do not invoke `npx expo run:ios --device` or `npx expo run:android --device`.
+   - Local toolchains can encounter device disk image mounting issues, provisioning certificate mismatches, or NDK/Xcode drift.
+   - EAS Build handles provisioning profiles, signing certificates, and uniform cloud environments for `@advanced-ai/sealed`.
+
+2. **Triggering EAS Builds**:
+   - **Physical iOS device (development profile)**:
+     ```bash
+     pnpm --filter @sealed/mobile build:eas:ios
+     # or: npx eas-cli build --profile development --platform ios (from apps/mobile)
+     # or: task mobile:build:eas:ios
+     ```
+   - **iOS Simulator**:
+     ```bash
+     pnpm --filter @sealed/mobile build:eas:sim
+     # or: npx eas-cli build --profile development:simulator --platform ios
+     ```
+   - **Android**:
+     ```bash
+     pnpm --filter @sealed/mobile build:eas:android
+     # or: npx eas-cli build --profile development --platform android
+     ```
+
+3. **Development Sessions**:
+   - Once the EAS development build is installed on the device, run the local Metro bundler and services with `pnpm dev` or `npx expo start --dev-client`.
+   - The installed development client connects directly to the local Metro server via LAN QR code or URL scheme (`exp+sealed://`).
+
+4. **CI & Bundle Verification**:
+   - For fast typecheck and bundle export checks without native compilation, use `task mobile:export` / `npx expo export`.
