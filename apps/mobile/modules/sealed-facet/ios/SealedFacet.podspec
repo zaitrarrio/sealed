@@ -2,9 +2,9 @@ require 'json'
 
 package = JSON.parse(File.read(File.join(__dir__, '..', 'package.json')))
 
-# The Rust decoder, cross-compiled by `task build:facet-ios` into ios/SealedFacet.xcframework (git-ignored).
-# Without it the pod builds a stub and the JavaScript side reports the native decoder as unavailable.
-has_library = File.directory?(File.join(__dir__, 'SealedFacet.xcframework'))
+# The Rust decoder, cross-compiled by `task build:facet-ios` into ios/SealedFacet.xcframework.
+# Without it (or if incomplete) the pod builds a stub and the JavaScript side reports the native decoder as unavailable.
+has_library = File.file?(File.join(__dir__, 'SealedFacet.xcframework', 'Info.plist'))
 
 Pod::Spec.new do |s|
   s.name           = 'SealedFacet'
