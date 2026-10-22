@@ -579,6 +579,63 @@ mod e2e {
                 .is_empty()
         );
         assert!(det2.luma.is_none());
+
+        // Test rotation and mirroring invariance on synthetic capture
+        fn rot90(w: usize, h: usize, data: &[u8]) -> (usize, usize, Vec<u8>) {
+            let mut out = vec![0u8; w * h * 4];
+            for y in 0..h {
+                for x in 0..w {
+                    let src = (y * w + x) * 4;
+                    let nx = h - 1 - y;
+                    let ny = x;
+                    let dst = (ny * h + nx) * 4;
+                    out[dst..dst + 4].copy_from_slice(&data[src..src + 4]);
+                }
+            }
+            (h, w, out)
+        }
+
+        for rotation_steps in 1..=3 {
+            let angle = rotation_steps * 90;
+            let (mut rw, mut rh) = (v.capture.width, v.capture.height);
+            let mut rdata = rgba.clone();
+            for _ in 0..rotation_steps {
+                let (nw, nh, ndata) = rot90(rw, rh, &rdata);
+                rw = nw;
+                rh = nh;
+                rdata = ndata;
+            }
+            let rimg = RgbaImage::new(rw, rh, &rdata);
+            let mut rdet = GridDetector::new();
+            let rsets = rdet.detect(&rimg);
+            assert!(
+                !rsets.is_empty(),
+                "rotation {angle}°: expected at least 1 corner set, got {}",
+                rsets.len()
+            );
+        }
+
+        // Test horizontal mirroring
+        {
+            let mut mdata = vec![0u8; rgba.len()];
+            let w = v.capture.width;
+            let h = v.capture.height;
+            for y in 0..h {
+                for x in 0..w {
+                    let src = (y * w + x) * 4;
+                    let nx = w - 1 - x;
+                    let dst = (y * w + nx) * 4;
+                    mdata[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
+                }
+            }
+            let mimg = RgbaImage::new(w, h, &mdata);
+            let mut mdet = GridDetector::new();
+            let msets = mdet.detect(&mimg);
+            assert!(!msets.is_empty(), "mirrored: expected at least 1 corner set");
+            let mluma = mdet.luma.as_ref().unwrap();
+            let mh = grid_homography(&msets[0], v.n, mluma);
+            assert!(mh.is_some(), "mirrored: grid_homography should succeed");
+        }
     }
 }
 

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { RgbaImage } from "@sealed/core";
 import { FacetDecodeSession, type DecodeProgress, type DecodeResult, type DecodeSessionOptions } from "../lib/facet-decode";
 import { createGridDecoder, nativeFormat } from "../lib/native-facet";
+import type { StreamInfo } from "./camera-overlay";
 import { CodeCamera } from "./CodeCamera";
 import { PixelCamera, type RawFrame } from "./PixelCamera";
 
@@ -33,6 +34,7 @@ type Push = (session: FacetDecodeSession) => Promise<{ update: DecodeProgress; r
 function useDecoder(options: DecodeSessionOptions, onProgress: CaptureProps["onProgress"], onComplete: CaptureProps["onComplete"], onError: CaptureProps["onError"]) {
   const session = useMemo(() => new FacetDecodeSession(options), [options]);
   const [done, setDone] = useState(false);
+  const [lastProgress, setLastProgress] = useState<DecodeProgress | null>(null);
   const cbs = useRef({ onProgress, onComplete, onError });
   cbs.current = { onProgress, onComplete, onError };
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -45,6 +47,7 @@ function useDecoder(options: DecodeSessionOptions, onProgress: CaptureProps["onP
         if (session.finished) return;
         try {
           const { update, result } = await push(session);
+          setLastProgress(update);
           const now = Date.now();
           if (result || now - lastPost.current > 150) {
             lastPost.current = now;
@@ -67,7 +70,25 @@ function useDecoder(options: DecodeSessionOptions, onProgress: CaptureProps["onP
     [session],
   );
   const reportError = useCallback((m: string) => cbs.current.onError(m), []);
-  return { feed, done, reportError };
+
+  const streamHex = lastProgress?.progress.streamId
+    ? Array.from(lastProgress.progress.streamId)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+    : null;
+
+  const streamInfo: StreamInfo = {
+    streamId: streamHex,
+    tier: lastProgress?.progress.tier ?? null,
+    calibrated: lastProgress?.progress.calibrated ?? false,
+    fps: Math.round(lastProgress?.measurement.captureFps ?? 0) || null,
+  };
+
+  const isLocked = Boolean(
+    lastProgress && (lastProgress.progress.framesDecoded > 0 || lastProgress.progress.streamId !== null || lastProgress.progress.tier !== null),
+  );
+
+  return { feed, done, reportError, isLocked, streamInfo };
 }
 
 export function OpticalCapture({ decode = "codes", ...props }: CaptureProps & { decode?: "codes" | "pixels" }) {
@@ -75,13 +96,23 @@ export function OpticalCapture({ decode = "codes", ...props }: CaptureProps & { 
 }
 
 function CodeCapture({ options, onProgress, onComplete, onError, overlay, torch = false, keepAlive = false }: CaptureProps) {
-  const { feed, done, reportError } = useDecoder(options, onProgress, onComplete, onError);
+  const { feed, done, reportError, isLocked, streamInfo } = useDecoder(options, onProgress, onComplete, onError);
   const onCode = useCallback((text: string, at: number) => void feed((s) => s.pushCode(text, at)), [feed]);
-  return <CodeCamera onCode={onCode} active={!done || keepAlive} torch={torch} onError={reportError} {...(overlay ? { overlay } : {})} />;
+  return (
+    <CodeCamera
+      onCode={onCode}
+      active={!done || keepAlive}
+      torch={torch}
+      onError={reportError}
+      isLocked={isLocked}
+      streamInfo={streamInfo}
+      {...(overlay ? { overlay } : {})}
+    />
+  );
 }
 
 function PixelCapture({ options, onProgress, onComplete, onError, overlay }: CaptureProps) {
-  const { feed, done, reportError } = useDecoder(options, onProgress, onComplete, onError);
+  const { feed, done, reportError, isLocked, streamInfo } = useDecoder(options, onProgress, onComplete, onError);
   const native = useMemo(() => createGridDecoder([1, 2, 3]), []);
   useEffect(() => () => native?.dispose(), [native]);
   const onImage = useCallback((image: RgbaImage, at: number) => feed((s) => s.push(image, at)), [feed]);
@@ -93,5 +124,15 @@ function PixelCapture({ options, onProgress, onComplete, onError, overlay }: Cap
       }),
     [feed, native],
   );
-  return <PixelCamera onImage={onImage} {...(native ? { onRaw } : {})} active={!done} onError={reportError} {...(overlay ? { overlay } : {})} />;
+  return (
+    <PixelCamera
+      onImage={onImage}
+      {...(native ? { onRaw } : {})}
+      active={!done}
+      onError={reportError}
+      isLocked={isLocked}
+      streamInfo={streamInfo}
+      {...(overlay ? { overlay } : {})}
+    />
+  );
 }

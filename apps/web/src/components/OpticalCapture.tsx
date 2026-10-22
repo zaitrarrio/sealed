@@ -5,6 +5,7 @@
  * Live progress (coverage) comes back from the worker. Camera settings are locked after the stream is detected.
  */
 import { useEffect, useRef, useState } from "react";
+import { CameraOverlay } from "./camera-overlay";
 import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, setTorch, stopStream, torchSupported, watchQrCodes } from "../lib/camera";
 import type { FromWorker, ToWorker, WorkerInit } from "../workers/facet-protocol";
 import { Notice } from "./ui";
@@ -34,6 +35,8 @@ export function OpticalCapture({
   const [locked, setLocked] = useState<string[] | null>(null);
   const [reader, setReader] = useState<"detector" | "frames" | null>(null);
   const [nativeDecoder, setNativeDecoder] = useState(false);
+  const [mirrored, setMirrored] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<CaptureUpdate | null>(null);
   const cbs = useRef({ onProgress, onComplete, onError, onTorchSupport });
   cbs.current = { onProgress, onComplete, onError, onTorchSupport };
 
@@ -53,6 +56,7 @@ export function OpticalCapture({
       if (m.type === "note") {
         console.info(m.message);
       } else if (m.type === "progress") {
+        setLastUpdate(m);
         cbs.current.onProgress(m);
         setNativeDecoder(m.nativeDecoder);
         if (!lockedOnce && (m.progress.calibrated || m.progress.framesDecoded > 0) && stream) {
@@ -82,6 +86,8 @@ export function OpticalCapture({
         await video.play().catch(() => undefined);
         const track = stream.getVideoTracks()[0] ?? null;
         trackRef.current = track;
+        const facing = track?.getSettings().facingMode;
+        if (facing === "environment") setMirrored(false);
         if (track) cbs.current.onTorchSupport?.(torchSupported(track));
         const qrOnly = init.tiers !== undefined && init.tiers.every((t) => t === 0);
         const detector = qrOnly ? await qrDetector() : null;
@@ -114,13 +120,37 @@ export function OpticalCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isLocked = Boolean(
+    lastUpdate &&
+      (lastUpdate.progress.calibrated ||
+        lastUpdate.progress.framesDecoded > 0 ||
+        lastUpdate.progress.fraction > 0),
+  );
+
   return (
     <div className="stack">
       {cameraError ? (
         <Notice tone="danger">{cameraError}</Notice>
       ) : (
-        <div className="scanner">
+        <div className={`scanner ${mirrored ? "is-mirrored" : ""}`}>
           <video ref={videoRef} playsInline muted aria-label="Camera view of the sender's screen" />
+          <CameraOverlay
+            isLocked={isLocked}
+            streamInfo={{
+              streamId: lastUpdate?.progress.streamId
+                ? Array.from(lastUpdate.progress.streamId)
+                    .map((b) => b.toString(16).padStart(2, "0"))
+                    .join("")
+                : null,
+              tier: lastUpdate?.progress.tier ?? null,
+              calibrated: lastUpdate?.progress.calibrated ?? false,
+              validFrames: lastUpdate?.progress.framesDecoded,
+              totalFrames: lastUpdate?.progress.framesSeen,
+              fps: lastUpdate?.measurement?.captureFps,
+            }}
+            isMirrored={mirrored}
+            onToggleMirror={() => setMirrored((m) => !m)}
+          />
         </div>
       )}
       {reader && (

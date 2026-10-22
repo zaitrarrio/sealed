@@ -177,11 +177,13 @@ export default function ReceiveOffline() {
 
 function LiveStatus({ update, signal }: { update: DecodeProgress | null; signal: string | null }) {
   const p = update?.progress;
+  const isLocked = Boolean(p && (p.framesDecoded > 0 || p.streamId !== null || p.tier !== null));
   const loss = p?.recentLoss !== null && p?.recentLoss !== undefined ? ` · missing ${Math.round(p.recentLoss * 100)}%` : "";
+  const lockPrefix = isLocked ? "🔒 Locked · " : "";
   const text = !p
     ? "Looking for their stream…"
     : p.framesDecoded === 0
       ? `Reading… ${p.framesSeen} codes seen, none from Sealed yet`
-      : `${Math.round(p.fraction * 100)}% · ${p.framesDecoded} frames · ${update.measurement.captureFps.toFixed(0)}/s${loss}${signal ? ` · torch: ${signal}` : ""}`;
+      : `${lockPrefix}${Math.round(p.fraction * 100)}% · ${p.framesDecoded} frames · ${update.measurement.captureFps.toFixed(0)}/s${loss}${signal ? ` · torch: ${signal}` : ""}`;
   return <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: "#F4EDE4" }}>{text}</Text>;
 }

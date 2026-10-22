@@ -64,6 +64,24 @@ export function shortenedExposure(c: { exposureDuration: number; iso: number; mi
 }
 
 /**
+ * Applies the screen exposure bias immediately (before any lock) so that viewing a bright, reflective
+ * phone screen does not cause the camera sensor to overexpose and wash out anchors.
+ */
+export async function applyScreenBias(camera: CameraRef, os: string): Promise<number | null> {
+  const controller: CameraController | undefined = camera.controller;
+  const bias = controller ? screenBias(controller.device, os) : null;
+  if (controller && bias !== null) {
+    try {
+      await controller.setExposureBias(bias);
+      return bias;
+    } catch {
+      // keep auto exposure
+    }
+  }
+  return null;
+}
+
+/**
  * Locks the camera on the screen it is pointed at. `viewPoint` is where the code was seen in the preview, in view
  * coordinates (the centre when unknown); `os` is Platform.OS, kept out of this module so it runs in Node tests.
  */

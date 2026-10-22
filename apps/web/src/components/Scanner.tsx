@@ -23,6 +23,7 @@ export interface ScannerProps {
 export function Scanner({ onCode, label = "Point the camera at the code", pasteLabel = "Or paste a code or link", autoStart = true }: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [active, setActive] = useState(false);
+  const [mirrored, setMirrored] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [paste, setPaste] = useState("");
@@ -79,7 +80,10 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
         video.srcObject = stream;
         await video.play().catch(() => undefined);
         const track = stream.getVideoTracks()[0];
-        if (track) await continuousFocus(track);
+        if (track) {
+          if (track.getSettings().facingMode === "environment") setMirrored(false);
+          await continuousFocus(track);
+        }
         stopScan = scanQr(video, (text) => {
           void handle(text, true).then((accepted) => {
             if (accepted) setActive(false);
@@ -105,8 +109,20 @@ export function Scanner({ onCode, label = "Point the camera at the code", pasteL
   return (
     <div className="stack">
       {active ? (
-        <div className="scanner">
+        <div className={`scanner ${mirrored ? "is-mirrored" : ""}`}>
           <video ref={videoRef} playsInline muted aria-label={label} />
+          <button
+            type="button"
+            className={`mirror-toggle-btn ${mirrored ? "active" : ""}`}
+            style={{ position: "absolute", top: 12, right: 12, zIndex: 10 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMirrored((m) => !m);
+            }}
+            title={mirrored ? "Mirror mode is ON" : "Mirror mode is OFF"}
+          >
+            ⇄ {mirrored ? "Mirrored" : "Normal"}
+          </button>
         </div>
       ) : (
         <div className="card sunken stack">

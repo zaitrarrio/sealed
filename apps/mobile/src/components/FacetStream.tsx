@@ -138,14 +138,14 @@ function Stage({ sender, onStop, caption, codes }: { sender: FacetSender; onStop
   // after two newer frames have replaced it.
   const recent = useRef<SkImage[]>([]);
 
-  // Full brightness while streaming; the previous level is restored on exit.
+  // High brightness while streaming without overexposing camera sensors (0.85); previous level is restored on exit.
   useEffect(() => {
     let previous: number | null = null;
     let cancelled = false;
     void (async () => {
       try {
         previous = await Brightness.getBrightnessAsync();
-        if (!cancelled) await Brightness.setBrightnessAsync(1);
+        if (!cancelled) await Brightness.setBrightnessAsync(0.85);
       } catch {
         // Brightness control unavailable (or permission refused on Android system brightness).
       }

@@ -1,26 +1,29 @@
 /**
- * Full-frame camera that hands raw camera frames to JavaScript as RGBA (for the colour-grid tiers, which the
- * platform QR detector cannot read). VisionCamera delivers 8-bit RGB frames to a frame-processor worklet; the
- * worklet copies the pixel buffer and schedules `onImage` on the JS thread. While `onImage` runs, the worklet
- * drops new frames (a cross-runtime `busy` flag), so the consumer always works on the freshest capture.
+ * Full-frame camera that hands raw camera frames to JavaScript as RGBA or raw native buffers (for the
+ * colour-grid tiers, which the platform QR detector cannot read).
  *
- * Slow by nature (the JavaScript decoder takes ~0.5 s per frame on a phone); offline transfers use CodeCamera.
+ * Like CodeCamera (ADR-0021), this session configures fast frames (60 fps target) without stabilisation or HDR,
+ * applies immediate exposure bias to cut through bright display glare, and locks focus, exposure (1/500 s),
+ * and white balance on the other screen once aimed or tapped.
  */
 import type { RgbaImage } from "@sealed/core";
 import { color, radius } from "@sealed/tokens";
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { StyleSheet, View } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission, useFrameOutput, type Frame } from "react-native-vision-camera";
+import { Platform, Pressable, StyleSheet, View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
+import { Camera, useCameraDevice, useCameraPermission, useFrameOutput, type CameraRef, type Frame } from "react-native-vision-camera";
 import { createSynchronizable, scheduleOnRN } from "react-native-worklets";
 import { useAppActive } from "../lib/app-state";
-import { SCREEN_READER_CONSTRAINTS } from "../lib/camera-lock";
+import { applyScreenBias, lockOnScreen, unlock, SCREEN_READER_CONSTRAINTS, type LockResult } from "../lib/camera-lock";
 import { isSupportedFormat, toRgba, type RawPixelFormat } from "../lib/frame-convert";
 import { Button, Notice, P, Row } from "../ui/kit";
+import { CameraOverlay, type StreamInfo } from "./camera-overlay";
 
 // Stable references: VisionCamera rebuilds the frame output (and its worklet runtime) when these change.
 const TARGET_RESOLUTION = { width: 1920, height: 1080 } as const;
 const NOOP = () => undefined;
+/** With no frame for this long, the lock is released so auto focus can search again. */
+const QUIET_MS = 2500;
 
 export interface RawFrame {
   data: Uint8Array;
@@ -39,19 +42,72 @@ export interface PixelCameraProps {
   label?: string;
   overlay?: ReactNode;
   onError?: (message: string) => void;
+  onLock?: (result: LockResult | null) => void;
+  onCameraFps?: (fps: number | null) => void;
+  /** Whether the stream/transmission is locked, to update the reticle and viewfinder badge. */
+  isLocked?: boolean;
+  streamInfo?: StreamInfo;
 }
 
-export function PixelCamera({ onImage, onRaw, active = true, label = "Camera view of the other screen", overlay, onError }: PixelCameraProps) {
+export function PixelCamera({
+  onImage,
+  onRaw,
+  active = true,
+  label = "Camera view of the other screen",
+  overlay,
+  onError,
+  onLock,
+  onCameraFps,
+  isLocked = false,
+  streamInfo,
+}: PixelCameraProps) {
   const device = useCameraDevice("back");
   const { hasPermission, requestPermission } = useCameraPermission();
   const focused = useIsFocused();
   const appActive = useAppActive();
   const [formatError, setFormatError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [currentLock, setCurrentLock] = useState<LockResult | null>(null);
+  const [tapPoint, setTapPoint] = useState<{ x: number; y: number } | null>(null);
+
   const busy = useMemo(() => createSynchronizable(false), []);
   const cb = useRef({ onImage, onRaw, onError });
   cb.current = { onImage, onRaw, onError };
+  const lockCb = useRef(onLock);
+  lockCb.current = onLock;
+  const fpsCb = useRef(onCameraFps);
+  fpsCb.current = onCameraFps;
+
+  const camera = useRef<CameraRef>(null);
+  const view = useRef({ width: 0, height: 0 });
+  const lockState = useRef<"idle" | "locking" | "locked">("idle");
+  const lastActiveAt = useRef(0);
 
   useEffect(() => () => busy.setBlocking(true), [busy]);
+
+  const release = useCallback(() => {
+    if (lockState.current === "idle") return;
+    lockState.current = "idle";
+    setCurrentLock(null);
+    lockCb.current?.(null);
+    if (camera.current) void unlock(camera.current);
+  }, []);
+
+  const aimAt = useCallback((point: { x: number; y: number }) => {
+    if (!camera.current) return;
+    lockState.current = "locking";
+    void lockOnScreen(camera.current, point, Platform.OS).then(
+      (r) => {
+        lockState.current = "locked";
+        setCurrentLock(r);
+        lockCb.current?.(r);
+      },
+      () => {
+        lockState.current = "idle";
+        setCurrentLock(null);
+      },
+    );
+  }, []);
 
   const deliverRef = useRef((buffer: ArrayBuffer, width: number, height: number, bytesPerRow: number, format: string, timestamp: number) => {
     void (async () => {
@@ -62,6 +118,7 @@ export function PixelCamera({ onImage, onRaw, active = true, label = "Camera vie
         }
         if (cb.current.onRaw) await cb.current.onRaw({ data: new Uint8Array(buffer), width, height, bytesPerRow, format }, timestamp);
         else await cb.current.onImage(toRgba(new Uint8Array(buffer), width, height, bytesPerRow, format), timestamp);
+        lastActiveAt.current = performance.now();
       } catch (e) {
         cb.current.onError?.(e instanceof Error ? e.message : String(e));
       } finally {
@@ -69,6 +126,7 @@ export function PixelCamera({ onImage, onRaw, active = true, label = "Camera vie
       }
     })();
   });
+
   const deliver = useCallback(
     (buffer: ArrayBuffer, width: number, height: number, bytesPerRow: number, format: string, timestamp: number) => deliverRef.current(buffer, width, height, bytesPerRow, format, timestamp),
     [],
@@ -101,6 +159,33 @@ export function PixelCamera({ onImage, onRaw, active = true, label = "Camera vie
   });
   const outputs = useMemo(() => [output], [output]);
 
+  // Release lock on quiet spell
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => {
+      if (lockState.current === "locked" && performance.now() - lastActiveAt.current > QUIET_MS) release();
+    }, 500);
+    return () => clearInterval(t);
+  }, [active, release]);
+
+  // When isLocked becomes true from valid frames, ensure camera optical lock is engaged
+  useEffect(() => {
+    if (isLocked && lockState.current === "idle" && camera.current) {
+      const { width, height } = view.current;
+      aimAt(width > 0 && height > 0 ? { x: width / 2, y: height / 2 } : { x: 180, y: 240 });
+    }
+  }, [isLocked, aimAt]);
+
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    view.current = { width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height };
+  }, []);
+
+  const handleTap = useCallback((e: GestureResponderEvent) => {
+    const { locationX, locationY } = e.nativeEvent;
+    setTapPoint({ x: locationX, y: locationY });
+    aimAt({ x: locationX, y: locationY });
+  }, [aimAt]);
+
   if (!hasPermission) {
     return (
       <Notice>
@@ -115,29 +200,54 @@ export function PixelCamera({ onImage, onRaw, active = true, label = "Camera vie
   }
   if (!device) return <Notice tone="danger">No camera is available on this device.</Notice>;
 
+  const transmissionLocked = Boolean(isLocked || (currentLock && currentLock.locked.length > 0));
+
   return (
     <View style={{ gap: 8 }}>
-      <View style={styles.frame} accessibilityLabel={label}>
+      <Pressable style={styles.frame} accessibilityLabel={label} onLayout={onLayout} onPress={handleTap}>
         <Camera
+          ref={camera}
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={active && focused && appActive}
           outputs={outputs}
           constraints={SCREEN_READER_CONSTRAINTS}
-          onError={(e) => cb.current.onError?.(e.message)}
+          resizeMode="cover"
+          onSessionConfigSelected={(c) => {
+            fpsCb.current?.(c.selectedFPS ?? null);
+            if (camera.current) void applyScreenBias(camera.current, Platform.OS);
+          }}
+          onSubjectAreaChanged={release}
+          onStopped={release}
+          onError={(e) => {
+            setCameraError(e.message);
+            cb.current.onError?.(e.message);
+          }}
         />
-        {overlay ? (
-          <View style={styles.overlay} pointerEvents="none">
-            {overlay}
-          </View>
-        ) : null}
-      </View>
+        <CameraOverlay
+          isLocked={transmissionLocked}
+          streamInfo={{
+            ...streamInfo,
+            exposure: currentLock?.exposure ? `1/${Math.round(1 / currentLock.exposure.durationS)}s` : undefined,
+          }}
+          tapPoint={tapPoint}
+        >
+          {overlay}
+        </CameraOverlay>
+      </Pressable>
       {formatError ? <Notice tone="danger">{formatError}</Notice> : null}
+      {cameraError ? <Notice tone="danger">{cameraError}</Notice> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  frame: { width: "100%", aspectRatio: 3 / 4, borderRadius: radius.lg, overflow: "hidden", backgroundColor: color.bgSunken },
-  overlay: { position: "absolute", left: 0, right: 0, bottom: 0, padding: 12, backgroundColor: "rgba(11,9,8,0.72)" },
+  frame: {
+    width: "100%",
+    aspectRatio: 3 / 4,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    backgroundColor: color.bgSunken,
+    position: "relative",
+  },
 });

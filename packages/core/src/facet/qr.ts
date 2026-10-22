@@ -92,18 +92,43 @@ function sharpened(image: RgbaImage, sigma: number, amount: number): Uint8Clampe
   return out;
 }
 
+function downsampleImage(image: RgbaImage, maxEdge: number): { width: number; height: number; data: Uint8ClampedArray } {
+  const { width: w, height: h, data } = image;
+  const maxDim = Math.max(w, h);
+  if (maxDim <= maxEdge) {
+    const clamped = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data.buffer, data.byteOffset, data.length);
+    return { width: w, height: h, data: clamped };
+  }
+  const scale = maxEdge / maxDim;
+  const nw = Math.max(1, Math.round(w * scale));
+  const nh = Math.max(1, Math.round(h * scale));
+  const out = new Uint8ClampedArray(nw * nh * 4);
+  const xRatio = w / nw;
+  const yRatio = h / nh;
+  for (let dy = 0; dy < nh; dy++) {
+    const sy = Math.floor(dy * yRatio);
+    const rowOff = sy * w * 4;
+    const dstOff = dy * nw * 4;
+    for (let dx = 0; dx < nw; dx++) {
+      const sx = Math.floor(dx * xRatio);
+      const sidx = rowOff + sx * 4;
+      const didx = dstOff + dx * 4;
+      out[didx] = data[sidx] as number;
+      out[didx + 1] = data[sidx + 1] as number;
+      out[didx + 2] = data[sidx + 2] as number;
+      out[didx + 3] = data[sidx + 3] as number;
+    }
+  }
+  return { width: nw, height: nh, data: out };
+}
+
 /** Decodes a QR code in the image; returns the frame bytes (Base45 decoded when applicable), or null. Never throws. */
 export function readQr(image: RgbaImage): Uint8Array | null {
   try {
-    const d = image.data;
-    const clamped = d instanceof Uint8ClampedArray ? d : new Uint8ClampedArray(d.buffer, d.byteOffset, d.length);
-    let r = jsQR(clamped, image.width, image.height, { inversionAttempts: "attemptBoth" });
-    for (const [sigma, amount] of [
-      [2, 1.5],
-      [4, 2.5],
-    ] as const) {
-      if (r) break;
-      r = jsQR(sharpened(image, sigma, amount), image.width, image.height, { inversionAttempts: "dontInvert" });
+    const down = downsampleImage(image, 640);
+    let r = jsQR(down.data, down.width, down.height, { inversionAttempts: "attemptBoth" });
+    if (!r) {
+      r = jsQR(sharpened(down, 2, 1.5), down.width, down.height, { inversionAttempts: "dontInvert" });
     }
     if (!r) return null;
     return qrFrameBytes(r.data) ?? Uint8Array.from(r.binaryData);

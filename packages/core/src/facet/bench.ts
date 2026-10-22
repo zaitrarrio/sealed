@@ -90,6 +90,8 @@ export interface BenchmarkReport {
   validFramesPerSecond: number;
   /** Payload bytes per second, counted from the first valid frame to completion (or to now). */
   goodputBytesPerSecond: number;
+  /** Estimated loss fraction (missed / total symbols), null until enough frames arrive. */
+  recentLoss?: number | null;
   /** Measured decode time per camera frame (image path only). */
   decodeMsPerFrame: number | null;
   /** Which decoder handled camera frames: the native module (ADR-0023) or the JavaScript one. */
@@ -137,8 +139,11 @@ export class BenchmarkMeter {
       if (this.nativeMs.length > 120) this.nativeMs.shift();
       let p = this.receiver.progress;
       for (const f of frames) p = this.receiver.pushFrameBytes(f, this.now());
-      // No grid frame: the receiver may still find a QR code in the image.
-      return frames.length ? p : this.receiver.push(image, this.now());
+      if (frames.length > 0) return p;
+      // No grid frame: if already locked onto a grid tier (1-3), stay focused on grid frames without QR overhead.
+      const currentTier = this.receiver.progress.tier;
+      if (currentTier !== null && currentTier > 0) return p;
+      return this.receiver.push(image, this.now());
     });
   }
 
@@ -239,6 +244,7 @@ export class BenchmarkMeter {
       inputsPerSecond: secs > 0 ? this.inputs / secs : 0,
       validFramesPerSecond: secs > 0 ? p.framesDecoded / secs : 0,
       goodputBytesPerSecond: Math.round(goodput),
+      recentLoss: p.recentLoss,
       decodeMsPerFrame: this.native ? (this.nativeMs.length ? Math.round(this.nativeMs.reduce((a, b) => a + b, 0) / this.nativeMs.length) : null) : m.decodeMsPerFrame > 0 ? Math.round(m.decodeMsPerFrame) : null,
       decoder: this.native ? "native" : m.decodeMsPerFrame > 0 ? "javascript" : null,
       verified: this.verified,

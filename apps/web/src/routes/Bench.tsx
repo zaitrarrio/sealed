@@ -8,6 +8,7 @@
  */
 import { BENCHMARK_SIZES, DEFAULT_QR_STREAM, QR_HOLDS, QR_PROFILES, describeQrStream, formatBenchmarkReport, isDefaultQrStream, qrStreamSetting, prepareBenchmarkStream, type BenchmarkReport, type BenchmarkStream, type Tier } from "@sealed/core";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CameraOverlay } from "../components/camera-overlay";
 import { FacetStream } from "../components/FacetStream";
 import { Notice, PageTitle, Progress, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
@@ -18,7 +19,6 @@ import { TorchPlayer, type TorchMessage } from "@sealed/core";
 import type { FromBenchWorker, ToBenchWorker } from "../workers/bench.worker";
 
 type Role = "film" | "show";
-
 export function BenchPage() {
   const [role, setRole] = useState<Role>("film");
   return (
@@ -203,8 +203,9 @@ function FilmStream() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<BenchmarkReport | null>(null);
-  const [reader, setReader] = useState<"detector" | "frames" | null>(null);
+  const [reader, setReader] = useState<"detector" | "frames" | "both" | null>(null);
   const [camera, setCamera] = useState<string>("");
+  const [mirrored, setMirrored] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [torchOk, setTorchOk] = useState<boolean | null>(null);
@@ -238,19 +239,32 @@ function FilmStream() {
         if (!video) return;
         video.srcObject = stream;
         await video.play().catch(() => undefined);
-        track.current = stream.getVideoTracks()[0] ?? null;
-        setTorchOk(track.current ? torchSupported(track.current) : false);
-        const fps = stream.getVideoTracks()[0]?.getSettings().frameRate;
+        const vt = stream.getVideoTracks()[0] ?? null;
+        track.current = vt;
+        const facing = vt?.getSettings().facingMode;
+        if (facing === "environment") setMirrored(false);
+        setTorchOk(vt ? torchSupported(vt) : false);
+        const fps = vt?.getSettings().frameRate;
         setCamera(fps ? `camera ${Math.round(fps)} fps (reads cleanly up to ${Math.floor(fps / 2)} frames/s)` : "camera fps unknown");
+
+        // Dual Engine: run BarcodeDetector on live video (hardware QR) AND feed raw video frames to worker (native SIMD WASM Grid)
         const detector = await qrDetector();
         if (cancelled) return;
+        let stopDetector: (() => void) | null = null;
         if (detector) {
-          setReader("detector");
-          stop = watchQrCodes(video, detector, (text) => worker.postMessage({ type: "code", text } satisfies ToBenchWorker));
-        } else {
-          setReader("frames");
-          stop = feedFrames(stream, video, (frame) => worker.postMessage({ type: "frame", frame } satisfies ToBenchWorker, [frame as unknown as Transferable]));
+          stopDetector = watchQrCodes(video, detector, (text) => worker.postMessage({ type: "code", text } satisfies ToBenchWorker));
         }
+
+        const stopFrames = feedFrames(stream, video, (frame) =>
+          worker.postMessage({ type: "frame", frame } satisfies ToBenchWorker, [frame as unknown as Transferable]),
+        );
+
+        setReader(detector ? "both" : "frames");
+
+        stop = () => {
+          stopDetector?.();
+          stopFrames();
+        };
       } catch (e) {
         setError(e instanceof CameraError ? e.message : errorMessage(e));
         setRunning(false);
@@ -267,33 +281,62 @@ function FilmStream() {
     };
   }, [running]);
 
-  const full = report ? { ...report, device: `${navigator.userAgent}${reader ? ` · ${reader === "detector" ? "BarcodeDetector" : "JS decoder"}` : ""}${camera ? ` · ${camera}` : ""}` } : null;
+  const full = report ? { ...report, device: `${navigator.userAgent}${reader ? ` · ${reader === "both" ? "Dual Engine (Hardware QR + WASM Grid)" : "WASM Grid frames"}` : ""}${camera ? ` · ${camera}` : ""}` } : null;
+  const isLocked = Boolean(
+    report &&
+      (report.validFrames > 0 ||
+        report.stage === "receiving" ||
+        report.stage === "complete" ||
+        report.stage === "verified"),
+  );
   const text = full ? formatBenchmarkReport(full) : "";
 
   return (
     <div className="stack">
       {error && <Notice tone="danger">{error}</Notice>}
       {!running && (
-        <button
-          type="button"
-          className="btn primary block"
-          data-testid="bench-film"
-          onClick={() => {
-            setReport(null);
-            setCopied(false);
-            setError(null);
-            setRunning(true);
-          }}
-        >
-          {report ? "Film again" : "Start filming"}
-        </button>
-      )}
-      {running && (
-        <div className="scanner">
-          <video ref={videoRef} playsInline muted aria-label="Camera view of the test stream" />
+        <div className="stack" style={{ gap: 10 }}>
+          <button
+            type="button"
+            className="btn primary block"
+            data-testid="bench-film"
+            onClick={() => {
+              setReport(null);
+              setCopied(false);
+              setError(null);
+              setRunning(true);
+            }}
+          >
+            {report ? "Film again" : "Start filming"}
+          </button>
         </div>
       )}
-      {reader && running && <p className="subtle">{reader === "detector" ? "Reading with the browser's QR detector." : "This browser has no QR detector: decoding camera frames in JavaScript (slower)."}</p>}
+      {running && (
+        <div className={`scanner ${mirrored ? "is-mirrored" : ""}`}>
+          <video ref={videoRef} playsInline muted aria-label="Camera view of the test stream" />
+          <CameraOverlay
+            isLocked={isLocked}
+            streamInfo={{
+              tier: report?.tier ?? null,
+              calibrated: report?.validFrames ? report.validFrames > 0 : false,
+              validFrames: report?.validFrames,
+              totalFrames: report?.inputs,
+              fps: report?.validFramesPerSecond,
+              goodputBytesPerSecond: report?.goodputBytesPerSecond,
+              lossEstimate: report?.recentLoss,
+            }}
+            isMirrored={mirrored}
+            onToggleMirror={() => setMirrored((m) => !m)}
+          />
+        </div>
+      )}
+      {reader && running && (
+        <p className="subtle">
+          {reader === "both"
+            ? "Dual-engine optical decoder: hardware QR detector + native SIMD WASM grid decoder (rotation invariant)."
+            : "Native SIMD WASM optical grid decoder active."}
+        </p>
+      )}
       {running && torchOk !== null && (
         <div className="stack">
           <p className="subtle">{torchOk ? "Flash the torch at the showing device (its screen should say what it read):" : "This browser cannot switch the torch, so it cannot signal the sender."}</p>

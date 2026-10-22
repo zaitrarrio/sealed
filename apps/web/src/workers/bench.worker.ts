@@ -17,7 +17,7 @@ export type ToBenchWorker =
   | { type: "stop" };
 export type FromBenchWorker = { type: "report"; report: BenchmarkReport };
 
-const MAX_EDGE = 1280;
+const MAX_EDGE = 1920;
 let meter = new BenchmarkMeter();
 let running = false;
 let nativeFactory: Promise<NativeDecoderFactory | null> | null = null;

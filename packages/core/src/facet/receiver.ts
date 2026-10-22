@@ -227,6 +227,7 @@ export class FacetReceiver {
         if (h && this.allowed.has(h.tier) && headerCrcMatches(header, payload)) {
           const sizeOk = h.tier === 0 ? isT0SymbolSize(payload.length) : payload.length === TIERS[h.tier].symbolSize || (h.type === "calibration" && payload.length === 0);
           if (sizeOk) {
+            this.lastTier = h.tier;
             if (h.type === "calibration") {
               if (this.streamMatches(h)) {
                 this.lockStream(h.streamId);
@@ -399,6 +400,7 @@ export class FacetReceiver {
     if (!this.streamMatches(h)) return false;
     if (h.type === "calibration") return false;
     this.lockStream(h.streamId);
+    this.lastTier = h.tier;
     const st = this.tierState(h.tier);
     // A data frame whose size disagrees with this stream's descriptor is not part of it.
     if (h.type === "data" && st.symbolSize !== null && payload.length !== st.symbolSize) return false;
@@ -483,6 +485,10 @@ export class FacetReceiver {
     } else {
       for (const [tier, st] of this.tiers) {
         if (st.pending.length > 0 && p.tier === null) p.tier = tier;
+      }
+      if (p.tier === null) {
+        if (this.lastTier !== null) p.tier = this.lastTier;
+        else if (this.calibration.size > 0) p.tier = this.calibration.keys().next().value ?? null;
       }
     }
     p.complete = this.resultBytes !== null;

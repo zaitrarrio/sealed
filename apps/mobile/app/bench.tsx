@@ -251,9 +251,39 @@ function FilmStream() {
       {!running ? <Button title={report ? "Film again" : "Start filming"} tone="primary" onPress={start} testID="bench-film" /> : null}
       {running ? (
         path === "codes" ? (
-          <CodeCamera key={run} onCode={onCode} onLock={setLock} onCameraFps={setCameraFps} torch={torch} overlay={overlay} label="Camera view of the test stream" />
+          <CodeCamera
+            key={run}
+            onCode={onCode}
+            onLock={setLock}
+            onCameraFps={setCameraFps}
+            torch={torch}
+            isLocked={Boolean(report && (report.validFrames > 0 || report.stage === "receiving" || report.tier !== null))}
+            streamInfo={{
+              tier: report?.tier,
+              calibrated: Boolean(report && report.validFrames > 0),
+              fps: cameraFps,
+              goodputBytesPerSecond: report?.goodputBytesPerSecond,
+            }}
+            overlay={overlay}
+            label="Camera view of the test stream"
+          />
         ) : (
-          <PixelCamera key={run} onImage={onImage} {...(native.current ? { onRaw } : {})} overlay={overlay} label="Camera view of the test stream" />
+          <PixelCamera
+            key={run}
+            onImage={onImage}
+            {...(native.current ? { onRaw } : {})}
+            onLock={setLock}
+            onCameraFps={setCameraFps}
+            isLocked={Boolean(report && (report.validFrames > 0 || report.stage === "receiving" || report.tier !== null))}
+            streamInfo={{
+              tier: report?.tier,
+              calibrated: Boolean(report && report.validFrames > 0),
+              fps: cameraFps,
+              goodputBytesPerSecond: report?.goodputBytesPerSecond,
+            }}
+            overlay={overlay}
+            label="Camera view of the test stream"
+          />
         )
       ) : null}
       {running && path === "codes" ? (

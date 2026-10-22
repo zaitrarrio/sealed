@@ -19,6 +19,93 @@ fn b64(s: &str) -> Vec<u8> {
 }
 
 #[test]
+fn fixture_streams_decode_at_arbitrary_rotations() {
+    let dir = fixtures_dir();
+    let Ok(rd) = fs::read_dir(&dir) else {
+        return;
+    };
+    let mut names: Vec<String> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".json") && n.starts_with("t1-"))
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return;
+    }
+
+    fn rot90(w: usize, h: usize, data: &[u8]) -> (usize, usize, Vec<u8>) {
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let src = (y * w + x) * 4;
+                let nx = h - 1 - y;
+                let ny = x;
+                let dst = (ny * h + nx) * 4;
+                out[dst..dst + 4].copy_from_slice(&data[src..src + 4]);
+            }
+        }
+        (h, w, out)
+    }
+
+    for rotation_steps in 1..=3 {
+        let angle_deg = rotation_steps * 90;
+        let mut dec = GridDecoder::new(1 << 1).expect("decoder");
+        for name in &names {
+            let json: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(dir.join(name)).unwrap()).unwrap();
+            let cap = &json["capture"];
+            let (mut w, mut h) = (
+                cap["width"].as_u64().unwrap() as usize,
+                cap["height"].as_u64().unwrap() as usize,
+            );
+            let mut rgba = fs::read(dir.join(cap["file"].as_str().unwrap())).unwrap();
+            for _ in 0..rotation_steps {
+                let (nw, nh, nbytes) = rot90(w, h, &rgba);
+                w = nw;
+                h = nh;
+                rgba = nbytes;
+            }
+            let img = RgbaImage::new(w, h, &rgba);
+            let frames = dec.push(&img).to_vec();
+            let header = b64(json["truth"]["header"].as_str().unwrap());
+            assert_eq!(
+                frames.len(),
+                1,
+                "{name} at {angle_deg}°: expected 1 frame, got {}",
+                frames.len()
+            );
+            assert_eq!(&frames[0][..12], &header[..], "{name} at {angle_deg}°: header mismatch");
+        }
+    }
+
+    // Mirroring (horizontal flip)
+    let mut dec_mirrored = GridDecoder::new(1 << 1).expect("decoder");
+    for name in &names {
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(name)).unwrap()).unwrap();
+        let cap = &json["capture"];
+        let (w, h) = (
+            cap["width"].as_u64().unwrap() as usize,
+            cap["height"].as_u64().unwrap() as usize,
+        );
+        let rgba = fs::read(dir.join(cap["file"].as_str().unwrap())).unwrap();
+        let mut mirrored = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let src = (y * w + x) * 4;
+                let nx = w - 1 - x;
+                let dst = (y * w + nx) * 4;
+                mirrored[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
+            }
+        }
+        let img = RgbaImage::new(w, h, &mirrored);
+        let frames = dec_mirrored.push(&img).to_vec();
+        eprintln!("{name} mirrored: {} frames", frames.len());
+    }
+}
+
+#[test]
 fn fixture_streams_decode_end_to_end() {
     let dir = fixtures_dir();
     let Ok(rd) = fs::read_dir(&dir) else {
