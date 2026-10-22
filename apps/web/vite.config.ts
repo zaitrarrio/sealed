@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   worker: { format: "es" },
   build: { target: "es2022", sourcemap: true, chunkSizeWarningLimit: 1200 },
-  server: { host: "localhost", port: 5173, strictPort: true },
-  preview: { host: "localhost", port: 5173, strictPort: true },
+  server: { host: "0.0.0.0", port: 5173, strictPort: true },
+  preview: { host: "0.0.0.0", port: 5173, strictPort: true },
   optimizeDeps: { include: ["qrcode", "qrcode/lib/core/qrcode", "jsqr", "fflate", "zod"] },
 });

@@ -96,9 +96,9 @@ pub struct GridDecoder {
 }
 
 impl GridDecoder {
-    /// `tiers_mask` has bit t set for each allowed grid tier (1..=3); none set → `None`.
+    /// `tiers_mask` has bit t set for each allowed grid tier (1..=4); none set → `None`.
     pub fn new(tiers_mask: u8) -> Option<Self> {
-        let allowed = tiers_mask & 0b1110;
+        let allowed = tiers_mask & 0b11110;
         if allowed == 0 {
             return None;
         }
@@ -118,6 +118,10 @@ impl GridDecoder {
 
     fn allows(&self, t: GridTier) -> bool {
         self.allowed & (1 << t as u8) != 0
+    }
+
+    fn allows_tier4(&self) -> bool {
+        self.allowed & (1 << 4) != 0
     }
 
     /// Frames decoded by the last `push`: header ∥ payload (payload empty for a calibration frame).
@@ -177,6 +181,17 @@ impl GridDecoder {
             return;
         };
         'sets: for set in &sets {
+            if self.allows_tier4()
+                && let Some(h) = grid_homography(set, crate::patch_modem::PATCH_GRID_N, &luma)
+            {
+                let result = crate::patch_modem::decode_patch_field(&luma, &h);
+                if !result.valid_packets.is_empty() {
+                    self.last_pixels_per_cell = pixels_per_cell(&h, crate::patch_modem::PATCH_GRID_N);
+                    self.frames.extend(result.valid_packets);
+                    break 'sets;
+                }
+            }
+
             for n in grid_sizes_for(set) {
                 let tiers: Vec<GridTier> = grid_tier_for_size(n)
                     .into_iter()

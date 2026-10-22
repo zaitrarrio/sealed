@@ -10,7 +10,7 @@
  * Grid streams are rasterized and scaled with nearest-neighbour sampling.
  */
 import { AlphaType, Canvas, ColorType, FilterMode, Image, MipmapMode, Path, Rect, Skia, type SkImage, type SkPath } from "@shopify/react-native-skia";
-import type { FacetFrame, FacetSender } from "@sealed/core";
+import type { FacetFrame, FrameSender } from "@sealed/core";
 import { FACET_BACKGROUND } from "@sealed/core";
 import { color } from "@sealed/tokens";
 import * as Brightness from "expo-brightness";
@@ -68,7 +68,7 @@ export function FacetStream({
   reduceMotion,
   codesPerScreen = 1,
 }: {
-  sender: FacetSender;
+  sender: FrameSender;
   onStop: () => void;
   caption?: string;
   reduceMotion?: boolean;
@@ -110,7 +110,7 @@ interface Stats {
   finished: boolean;
 }
 
-function Stage({ sender, onStop, caption, codes }: { sender: FacetSender; onStop: () => void; caption?: string; codes: number }) {
+function Stage({ sender, onStop, caption, codes }: { sender: FrameSender; onStop: () => void; caption?: string; codes: number }) {
   useKeepAwake("sealed-facet-stream");
   const { width, height } = useWindowDimensions();
   const active = useAppActive();

@@ -2,10 +2,10 @@
  * Writes Facet frames as a raw Y4M (YUV 4:2:0) file for Chromium's fake camera
  * (--use-file-for-fake-video-capture). Raw frames, no video encoder, as ADR-0010 requires of real capture.
  */
-import type { FacetSender } from "@sealed/core";
+import type { FrameSender } from "@sealed/core";
 import { closeSync, openSync, writeSync } from "node:fs";
 
-export function writeFacetY4m(path: string, sender: FacetSender, o: { width: number; height: number; codePx: number; frames: number; fps: number }): number {
+export function writeFacetY4m(path: string, sender: FrameSender, o: { width: number; height: number; codePx: number; frames: number; fps: number }): number {
   const { width: W, height: H } = o;
   const fd = openSync(path, "w");
   writeSync(fd, `YUV4MPEG2 W${W} H${H} F${o.fps}:1 Ip A1:1 C420jpeg\n`);

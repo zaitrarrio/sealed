@@ -41,7 +41,7 @@ export class NativeFacetDecoder implements GridFrameDecoder {
   constructor(tiers: readonly number[]) {
     if (!native) throw new Error("SealedFacet native module is not linked");
     let mask = 0;
-    for (const t of tiers) if (t >= 1 && t <= 3) mask |= 1 << t;
+    for (const t of tiers) if (t >= 1 && t <= 4) mask |= 1 << t;
     this.handle = native.create(mask);
     if (!this.handle) throw new Error("SealedFacet: could not create a decoder (library missing or no grid tier)");
   }

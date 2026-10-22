@@ -130,6 +130,10 @@ export function readQr(image: RgbaImage): Uint8Array | null {
     if (!r) {
       r = jsQR(sharpened(down, 2, 1.5), down.width, down.height, { inversionAttempts: "dontInvert" });
     }
+    if (!r && (image.width > 640 || image.height > 640)) {
+      const clamped = image.data instanceof Uint8ClampedArray ? image.data : new Uint8ClampedArray(image.data.buffer, image.data.byteOffset, image.data.length);
+      r = jsQR(clamped, image.width, image.height, { inversionAttempts: "dontInvert" });
+    }
     if (!r) return null;
     return qrFrameBytes(r.data) ?? Uint8Array.from(r.binaryData);
   } catch {

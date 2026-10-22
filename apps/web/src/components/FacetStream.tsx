@@ -8,7 +8,7 @@
  * per screen (ADR-0019), each a different frame; the next batch is encoded right after a batch is shown, while
  * the display holds it. Grid streams are rasterized.
  */
-import type { FacetFrame, FacetSender } from "@sealed/core";
+import type { FacetFrame, FrameSender } from "@sealed/core";
 import { FACET_BACKGROUND } from "@sealed/core";
 import { useEffect, useRef, useState } from "react";
 import { FrameScheduler, layoutCodes, streamSizePx, type CodeSlot } from "../lib/frame-scheduler";
@@ -19,7 +19,7 @@ function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
-export function FacetStream({ sender, onStop, caption, codesPerScreen = 1 }: { sender: FacetSender; onStop: () => void; caption?: string; codesPerScreen?: number }) {
+export function FacetStream({ sender, onStop, caption, codesPerScreen = 1 }: { sender: FrameSender; onStop: () => void; caption?: string; codesPerScreen?: number }) {
   const codes = sender.tier === 0 ? Math.max(1, Math.min(4, Math.floor(codesPerScreen))) : 1;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [confirmed, setConfirmed] = useState(() => !prefersReducedMotion());

@@ -17,7 +17,7 @@ export type ToBenchWorker =
   | { type: "stop" };
 export type FromBenchWorker = { type: "report"; report: BenchmarkReport };
 
-const MAX_EDGE = 1920;
+const MAX_EDGE = 800;
 let meter = new BenchmarkMeter();
 let running = false;
 let nativeFactory: Promise<NativeDecoderFactory | null> | null = null;
@@ -100,7 +100,7 @@ self.onmessage = (ev: MessageEvent<ToBenchWorker>) => {
       const started = new BenchmarkMeter();
       meter = started;
       // Grid tiers through the native module when it is available (ADR-0023); frames before it loads use JavaScript.
-      const grid = (m.tiers ?? [0, 1, 2, 3]).filter((t) => t >= 1 && t <= 3);
+      const grid = (m.tiers ?? [0, 1, 2, 3, 4]).filter((t) => t >= 1 && t <= 4);
       if (grid.length) {
         void loadNative().then((f) => {
           if (f && meter === started && running) started.useNative(f.create(grid));

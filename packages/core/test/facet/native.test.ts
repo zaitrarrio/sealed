@@ -7,9 +7,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FacetReceiver, loadNativeDecoder } from "../../src/facet/index";
+import { renderPatchField, type PatchPacket, TOTAL_PATCHES, PATCH_PAYLOAD_BYTES } from "../../src/facet/patch-modem";
 
 const wasmPath = resolve(__dirname, "../../wasm/sealed_facet.wasm");
-const fixtureDir = resolve(__dirname, "../../../../crates/sealed-facet/fixtures");
+const fixtureDir = resolve(__dirname, "../../../crates/sealed-facet/fixtures");
 const ready = existsSync(wasmPath) && existsSync(fixtureDir);
 
 interface Fixture {
@@ -75,6 +76,48 @@ describe.skipIf(!ready)("native grid decoder (wasm)", () => {
     }
     expect(receiver.progress.framesDecoded).toBeGreaterThanOrEqual(3);
     expect(receiver.progress.symbolsReceived).toBeGreaterThanOrEqual(2);
+    native.dispose();
+  });
+});
+
+describe.skipIf(!existsSync(wasmPath))("native grid decoder T4 (patch modem)", () => {
+  it("T4: decodes 16 Monochrome Patch Modem packets via WebAssembly SIMD in under 5ms", async () => {
+    const factory = await loadNativeDecoder(readFileSync(wasmPath));
+    const native = factory.create([4]);
+
+    const packets: PatchPacket[] = [];
+    for (let pid = 0; pid < TOTAL_PATCHES; pid++) {
+      const payload = new Uint8Array(PATCH_PAYLOAD_BYTES);
+      for (let i = 0; i < PATCH_PAYLOAD_BYTES; i++) payload[i] = (pid * 13 + i * 5) & 0xff;
+      packets.push({
+        epoch: pid % 4,
+        type: pid === 0 ? "descriptor" : "data",
+        patchId: pid,
+        sbn: Math.floor(pid / 4),
+        esi: pid * 10,
+        payload,
+      });
+    }
+
+    const sizePx = 600;
+    const image = renderPatchField(packets, sizePx);
+
+    // Warm up
+    native.push(image);
+
+    const t0 = performance.now();
+    const frames = native.push(image);
+    const ms = performance.now() - t0;
+    console.log(`T4 Patch Modem WASM decode time: ${ms.toFixed(2)} ms for 16 patches (${(1000 / ms).toFixed(0)} FPS equivalent)`);
+
+    expect(frames.length).toBe(TOTAL_PATCHES);
+    for (const frame of frames) {
+      expect(frame.length).toBe(55);
+      const patchId = frame[0]! & 0x0f;
+      const original = packets[patchId]!;
+      expect(frame.subarray(5, 53)).toEqual(original.payload);
+    }
+
     native.dispose();
   });
 });

@@ -15,6 +15,8 @@ import type { FacetSender } from "./sender";
 import { TIERS } from "./tiers";
 import type { RgbaImage, Tier } from "./types";
 import type { GridFrameDecoder, NativePixelFormat } from "./native";
+import { PatchSender, PatchReceiver } from "./patch-stream";
+import { PATCH_PAYLOAD_BYTES, rawToRgba } from "./patch-modem";
 
 const NAME = /^sealed-bench-(\d{1,10})-(\d{1,9})\.bin$/;
 export const BENCHMARK_SIZES = [16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024] as const;
@@ -44,7 +46,7 @@ export function parseBenchmarkFileName(name: string): { seed: number; size: numb
 }
 
 export interface BenchmarkStream {
-  sender: FacetSender;
+  sender: FacetSender | PatchSender;
   seed: number;
   size: number;
   tier: Tier;
@@ -57,6 +59,10 @@ export async function prepareBenchmarkStream(o: { size: number; tier: Tier; seed
   const seed = (o.seed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0;
   const data = benchmarkPayload(seed, o.size);
   const qr = { symbolSize: o.qr?.symbolSize ?? TIERS[0].symbolSize, holdRefreshes60: o.qr?.holdRefreshes60 ?? TIERS[0].holdRefreshes60 };
+  if (o.tier === 4) {
+    const sender = new PatchSender(data, seed);
+    return { sender, seed, size: o.size, tier: 4, qr };
+  }
   const { sender } = await prepareBroadcastStream({
     files: [{ path: benchmarkFileName(seed, o.size), mediaType: "application/octet-stream", size: o.size, data }],
     tier: o.tier,
@@ -104,6 +110,7 @@ export interface BenchmarkReport {
 /** Records one receive. Feed it camera frames (`pushImage`) or a platform detector's reads (`pushCode`). */
 export class BenchmarkMeter {
   private readonly receiver = new FacetReceiver();
+  private readonly patchReceiver = new PatchReceiver();
   private inputs = 0;
   private startedAt: number | null = null;
   private firstValidAt: number | null = null;
@@ -119,7 +126,7 @@ export class BenchmarkMeter {
   constructor(private readonly now: () => number = () => (typeof performance !== "undefined" ? performance.now() : Date.now())) {}
 
   get complete(): boolean {
-    return this.completeAt !== null;
+    return this.completeAt !== null || this.patchReceiver.complete;
   }
 
   pushCode(content: string | Uint8Array): void {
@@ -127,40 +134,127 @@ export class BenchmarkMeter {
   }
 
   pushImage(image: RgbaImage): void {
+    const t0 = this.now();
+    if (this.startedAt === null) this.startedAt = t0;
+
     const native = this.native;
-    if (!native) {
-      this.track(() => this.receiver.push(image, this.now()));
-      return;
-    }
-    this.track(() => {
-      const t0 = this.now();
+    if (native) {
+      this.inputs++;
       const frames = native.push(image);
       this.nativeMs.push(this.now() - t0);
       if (this.nativeMs.length > 120) this.nativeMs.shift();
-      let p = this.receiver.progress;
-      for (const f of frames) p = this.receiver.pushFrameBytes(f, this.now());
-      if (frames.length > 0) return p;
-      // No grid frame: if already locked onto a grid tier (1-3), stay focused on grid frames without QR overhead.
+
+      let patchOk = false;
+      const gridFrames: Uint8Array[] = [];
+      for (const f of frames) {
+        if (f.length === 55) {
+          if (this.patchReceiver.pushPacketBytes(f, t0)) {
+            patchOk = true;
+          }
+        } else {
+          gridFrames.push(f);
+        }
+      }
+
+      if (patchOk) {
+        if (this.firstValidAt === null) this.firstValidAt = t0;
+        if (this.patchReceiver.complete) {
+          this.completeAt ??= t0;
+          this.verified = this.patchReceiver.progress.verified;
+          this.payloadBytes = this.patchReceiver.progress.payloadBytes;
+        }
+        return;
+      }
+
+      if (gridFrames.length > 0) {
+        this.track(() => {
+          let p = this.receiver.progress;
+          for (const f of gridFrames) p = this.receiver.pushFrameBytes(f, this.now());
+          return p;
+        });
+        return;
+      }
+
+      // No native grid or patch frame: if locked onto grid tier (1-3), stay focused without QR overhead
       const currentTier = this.receiver.progress.tier;
-      if (currentTier !== null && currentTier > 0) return p;
-      return this.receiver.push(image, this.now());
-    });
+      if (currentTier !== null && currentTier > 0) return;
+      this.track(() => this.receiver.push(image, this.now()));
+      return;
+    }
+
+    // Native not available: fallback to JavaScript decoders
+    this.inputs++;
+    const patchOk = this.patchReceiver.pushImage(image, t0);
+    if (patchOk) {
+      if (this.firstValidAt === null) this.firstValidAt = t0;
+      if (this.patchReceiver.complete) {
+        this.completeAt ??= t0;
+        this.verified = this.patchReceiver.progress.verified;
+        this.payloadBytes = this.patchReceiver.progress.payloadBytes;
+      }
+      return;
+    }
+
+    this.track(() => this.receiver.push(image, this.now()));
   }
 
   /** A raw camera buffer for the native decoder (no RGBA conversion); falls back to `pushImage` semantics without one. */
   pushRaw(data: Uint8Array, width: number, height: number, stride: number, format: NativePixelFormat): void {
+    const t0 = this.now();
+    if (this.startedAt === null) this.startedAt = t0;
+
     const native = this.native;
-    if (!native) return;
-    this.track(() => {
-      const t0 = this.now();
+    if (native) {
+      this.inputs++;
       const frames = native.pushRaw(data, width, height, stride, format);
       this.nativeMs.push(this.now() - t0);
       if (this.nativeMs.length > 120) this.nativeMs.shift();
-      let p = this.receiver.progress;
-      if (frames.length === 0) p = this.receiver.pushFrameBytes(new Uint8Array(0), this.now());
-      for (const f of frames) p = this.receiver.pushFrameBytes(f, this.now());
-      return p;
-    });
+
+      let patchOk = false;
+      const gridFrames: Uint8Array[] = [];
+      for (const f of frames) {
+        if (f.length === 55) {
+          if (this.patchReceiver.pushPacketBytes(f, t0)) {
+            patchOk = true;
+          }
+        } else {
+          gridFrames.push(f);
+        }
+      }
+
+      if (patchOk) {
+        if (this.firstValidAt === null) this.firstValidAt = t0;
+        if (this.patchReceiver.complete) {
+          this.completeAt ??= t0;
+          this.verified = this.patchReceiver.progress.verified;
+          this.payloadBytes = this.patchReceiver.progress.payloadBytes;
+        }
+        return;
+      }
+
+      if (gridFrames.length > 0) {
+        this.track(() => {
+          let p = this.receiver.progress;
+          for (const f of gridFrames) p = this.receiver.pushFrameBytes(f, this.now());
+          return p;
+        });
+        return;
+      }
+      return;
+    }
+
+    // Fallback if native is unavailable: downscale raw buffer and run pure JS patch modem
+    this.inputs++;
+    const img = rawToRgba(data, width, height, stride, format, 720);
+    if (this.patchReceiver.pushImage(img, t0)) {
+      if (this.firstValidAt === null) this.firstValidAt = t0;
+      if (this.patchReceiver.complete) {
+        this.completeAt ??= t0;
+        this.verified = this.patchReceiver.progress.verified;
+        this.payloadBytes = this.patchReceiver.progress.payloadBytes;
+      }
+      return;
+    }
   }
 
   /** Decodes grid tiers with the native module from now on; the receiver keeps QR from images. */
@@ -205,10 +299,53 @@ export class BenchmarkMeter {
   }
 
   report(): BenchmarkReport {
-    const p = this.receiver.progress;
     const t = this.completeAt ?? this.now();
     const elapsed = this.startedAt === null ? 0 : t - this.startedAt;
     const secs = elapsed / 1000;
+
+    const patchProg = this.patchReceiver.progress;
+    if (patchProg.isLocked) {
+      const stage: BenchmarkStage =
+        this.inputs === 0
+          ? "no-input"
+          : patchProg.verified === true
+            ? "verified"
+            : patchProg.verified === false
+              ? "failed"
+              : patchProg.complete
+                ? "complete"
+                : "receiving";
+
+      return {
+        stage,
+        verdict:
+          stage === "verified"
+            ? "Received and verified byte for byte via Monochrome Patch Modem."
+            : patchProg.packetsReceived > 0
+              ? `Locked: Monochrome Patch Modem (${patchProg.packetsReceived} packets, ${patchProg.glareErasures} erasures, goodput ${(patchProg.goodputBytesPerSecond / 1024).toFixed(1)} KB/s)`
+              : "Transmission locked: Monochrome Patch Modem (anchors acquired)",
+        tier: 4,
+        symbolSize: PATCH_PAYLOAD_BYTES,
+        payloadBytes: patchProg.payloadBytes,
+        inputs: this.inputs,
+        validFrames: patchProg.packetsReceived,
+        symbolsReceived: patchProg.packetsReceived,
+        symbolsNeeded: patchProg.packetsNeeded,
+        fraction: patchProg.fraction,
+        elapsedMs: Math.round(elapsed),
+        timeToFirstFrameMs: this.firstValidAt === null || this.startedAt === null ? null : Math.round(this.firstValidAt - this.startedAt),
+        inputsPerSecond: secs > 0 ? this.inputs / secs : 0,
+        validFramesPerSecond: secs > 0 ? patchProg.packetsReceived / secs : 0,
+        goodputBytesPerSecond: patchProg.goodputBytesPerSecond,
+        recentLoss: null,
+        decodeMsPerFrame: this.nativeMs.length ? this.nativeMs.reduce((a, b) => a + b, 0) / this.nativeMs.length : null,
+        decoder: this.native ? "native" : "javascript",
+        verified: patchProg.verified,
+        error: this.error,
+      };
+    }
+
+    const p = this.receiver.progress;
     const tier = p.tier;
     // Before the manifest is opened, estimate payload from the symbols the stream needs.
     const symbolSize = p.symbolSize ?? (tier !== null ? TIERS[tier].symbolSize : 0);

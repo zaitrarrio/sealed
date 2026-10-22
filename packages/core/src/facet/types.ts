@@ -3,7 +3,7 @@
  * depend only on these types; the implementation lives alongside in this folder.
  */
 
-export type Tier = 0 | 1 | 2 | 3;
+export type Tier = 0 | 1 | 2 | 3 | 4;
 
 /** An RGBA image, 4 bytes per pixel, row-major, as produced by canvas getImageData or a camera frame. */
 export interface RgbaImage {
@@ -28,6 +28,16 @@ export interface FacetFrame {
   /** Number of display refreshes (at 60 Hz) to hold this frame; double on 120 Hz displays. */
   holdRefreshes: number;
   sequence: number;
+}
+
+/** Common interface for optical frame senders (FacetSender, PatchSender). */
+export interface FrameSender {
+  readonly tier: Tier;
+  readonly finished: boolean;
+  next(): FacetFrame;
+  render(frame: FacetFrame, sizePx: number): RgbaImage;
+  qrModules(frame: FacetFrame): { size: number; modules: Uint8Array } | null;
+  qrText(frame: FacetFrame): string | null;
 }
 
 /** Decoded stream descriptor (spec §7.5): everything a receiver needs besides the data frames. */
@@ -74,6 +84,7 @@ export interface ReceiveProgress {
   recentLoss: number | null;
   calibrated: boolean;
   complete: boolean;
+  glareErasures?: number;
 }
 
 export interface CapabilityMeasurement {

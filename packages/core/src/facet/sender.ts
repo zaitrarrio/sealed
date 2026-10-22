@@ -72,7 +72,7 @@ const DESCRIPTOR_EVERY = 32;
 const PREAMBLE = 3;
 
 /** Generates the data symbol schedule (SBN, ESI) for one tier stream. */
-class SymbolSchedule {
+export class SymbolSchedule {
   private readonly k: number[];
   private phase: "source" | "repair" = "source";
   private block = 0;

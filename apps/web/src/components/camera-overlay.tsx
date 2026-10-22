@@ -30,7 +30,9 @@ export function CameraOverlay({
     streamInfo?.tier !== undefined && streamInfo.tier !== null
       ? streamInfo.tier === 0
         ? "T0 QR"
-        : `T${streamInfo.tier} Grid`
+        : streamInfo.tier === 4
+          ? "T4 Patch Modem"
+          : `T${streamInfo.tier} Grid`
       : null;
 
   const goodputKb = streamInfo?.goodputBytesPerSecond

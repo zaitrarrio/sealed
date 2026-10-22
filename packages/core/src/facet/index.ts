@@ -33,3 +33,27 @@ export {
 export { BrightnessGate, LossEstimator, RATE_LADDER, ReceiverRateController, TORCH_DONE_MS, TORCH_GAP_MS, TORCH_PULSE_MS, TorchDecoder, TorchPlayer, adaptQrRate, rateIndex, torchSchedule, type QrRate, type TorchMessage, type TorchStep } from "./backchannel";
 export { BACKGROUND as FACET_BACKGROUND, PALETTE_8 as FACET_PALETTE } from "./palette";
 export { NATIVE_ABI_VERSION, NativeGridDecoder, loadNativeDecoder, type GridFrameDecoder, type NativeDecoderFactory, type NativeExports, type NativePixelFormat } from "./native";
+export {
+  PATCH_GRID_N,
+  PATCH_ROWS,
+  PATCH_COLS,
+  TOTAL_PATCHES,
+  PATCH_CELLS,
+  PATCH_PAYLOAD_BYTES,
+  PATCH_HEADER_BYTES,
+  MIN_PATCH_CONTRAST,
+  encodePatchBits,
+  renderPatchField,
+  decodePatchField,
+  rawToRgba,
+  getPatchBounds,
+  type PatchPacket,
+  type PatchDecodeResult,
+  type PatchBounds,
+} from "./patch-modem";
+export {
+  PatchSender,
+  PatchReceiver,
+  type PatchStreamProgress,
+} from "./patch-stream";
+

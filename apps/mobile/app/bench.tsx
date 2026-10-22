@@ -23,7 +23,7 @@ import { session, useSession } from "../src/lib/session";
 import { Button, Card, Notice, P, Progress, Row, Screen, Segmented, Stack, Title, errorMessage, fonts } from "../src/ui/kit";
 
 type Role = "show" | "film";
-type TierChoice = "0" | "1" | "2" | "3";
+type TierChoice = "0" | "1" | "2" | "3" | "4";
 
 function deviceLine(): string {
   return `${Device.manufacturer ?? ""} ${Device.modelName ?? "phone"} · ${Platform.OS} ${Device.osVersion ?? ""}`.replace(/\s+/g, " ").trim();
@@ -53,7 +53,7 @@ function ShowStream() {
   const s = useSession();
   const saved = qrStreamSetting(s.settings.qrStream);
   const [size, setSize] = useState<string>(String(BENCHMARK_SIZES[1]));
-  const [tier, setTier] = useState<TierChoice>("0");
+  const [tier, setTier] = useState<TierChoice>("4");
   const [qrSize, setQrSize] = useState<string>(String(saved.symbolSize));
   const [codes, setCodes] = useState<"1" | "2" | "4">(String(saved.codesPerScreen) as "1" | "2" | "4");
   const [hold, setHold] = useState<string>(String(saved.holdRefreshes60));
@@ -66,7 +66,12 @@ function ShowStream() {
 
   if (stream) {
     const fps = 60 / stream.qr.holdRefreshes60;
-    const profile = stream.tier === 0 ? `QR ${stream.qr.symbolSize} B × ${codes} at ${fps}/s` : `T${stream.tier}`;
+    const profile =
+      stream.tier === 0
+        ? `QR ${stream.qr.symbolSize} B × ${codes} at ${fps}/s`
+        : stream.tier === 4
+          ? "T4 · Monochrome Patch Modem (Proposal)"
+          : `T${stream.tier}`;
     return (
       <View style={{ gap: 12 }}>
         <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? Number(codes) : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} reduceMotion={s.settings.reduceMotion ?? false} />
@@ -84,13 +89,19 @@ function ShowStream() {
         value={tier}
         onChange={setTier}
         options={[
+          ["4", "T4 Patch (Proposal)"],
           ["0", "QR"],
           ["1", "T1 grid"],
           ["2", "T2"],
           ["3", "T3"],
         ]}
       />
-      {tier === "0" ? (
+      {tier === "4" ? (
+        <P tone="subtle">
+          Monochrome Patch Modem (Proposal 21 Oct 2026): binary black &amp; white cells, 16 independent packets, local timing pilots,
+          localized glare-to-erasures, and RaptorQ fountain coding. Immune to color blending and glare.
+        </P>
+      ) : tier === "0" ? (
         <>
           <P tone="subtle">QR size (bytes per code)</P>
           <Segmented label="QR size" value={qrSize} onChange={setQrSize} options={QR_PROFILES.map((p) => [String(p.symbolSize), `v${p.qrVersion} · ${p.symbolSize}`] as const)} />
@@ -213,7 +224,7 @@ function FilmStream() {
     meter.current = new BenchmarkMeter();
     // Grid tiers through the native decoder when this build has it (ADR-0023).
     native.current?.dispose();
-    native.current = path === "pixels" ? createGridDecoder([1, 2, 3]) : null;
+    native.current = path === "pixels" ? createGridDecoder([1, 2, 3, 4]) : null;
     if (native.current) meter.current.useNative(native.current);
     setReport(meter.current.report());
     setCopied(false);

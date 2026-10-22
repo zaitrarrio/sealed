@@ -6,7 +6,7 @@
  * ABI (all integers u32 unless noted; pointers are byte offsets into `memory`):
  *   facet_abi_version()                                  → ABI_VERSION
  *   facet_alloc(len) / facet_free(ptr, len)              buffers owned by the caller
- *   facet_decoder_new(tiers_mask)                        bit t set allows grid tier t (1..3); 0 → null
+ *   facet_decoder_new(tiers_mask)                        bit t set allows grid tier t (1..4); 0 → null
  *   facet_decoder_free(dec)
  *   facet_decoder_push(dec, ptr, width, height, stride)  RGBA frame → number of frames decoded from it
  *   facet_decoder_push_format(dec, ptr, w, h, stride, f) same for f: 0 RGBA, 1 BGRA, 2 RGB (3 bytes/pixel)
@@ -62,7 +62,7 @@ export class NativeGridDecoder implements GridFrameDecoder {
     tiers: readonly number[],
   ) {
     let mask = 0;
-    for (const t of tiers) if (t >= 1 && t <= 3) mask |= 1 << t;
+    for (const t of tiers) if (t >= 1 && t <= 4) mask |= 1 << t;
     this.dec = x.facet_decoder_new(mask);
     if (!this.dec) throw new Error("native decoder: no grid tier allowed");
   }
