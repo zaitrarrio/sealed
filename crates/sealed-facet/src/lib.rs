@@ -27,6 +27,7 @@ pub mod layout;
 pub mod model;
 pub mod palette;
 mod parallel;
+pub mod learned_modem;
 pub mod patch_modem;
 pub mod random;
 pub mod receiver;

@@ -56,4 +56,59 @@ export {
   PatchReceiver,
   type PatchStreamProgress,
 } from "./patch-stream";
+export {
+  twoCellMatrix,
+  twoCellObservation,
+  twoCellSeparationSquared,
+  twoCellCodebookSeparations,
+  binaryEntropy,
+  fanoMutualInformationBound,
+  calculateGmi,
+  calculateGmiForS,
+  evaluateRateLedger,
+  certificationSampleSize,
+  exactLowerConfidenceBound,
+  type RateLedgerInput,
+  type RateLedgerResult,
+} from "./identifiability";
+export {
+  OpticalChannelSimulator,
+  type OpticalSimulatorOptions,
+  type SimulatedCapture,
+} from "./optical-channel-sim";
+export {
+  BASIS_TILE_SIZE,
+  BASIS_CODEBOOK,
+  generateSeparableBasisCodebook,
+  projectDisplayAlphabet,
+  encodeLearnedPatchBits,
+  renderLearnedPatchField,
+  type ModulationAlphabet,
+  type LearnedEncoderOptions,
+} from "./learned-encoder";
+export {
+  HALO_CELLS,
+  SpatiotemporalNeuralEqualizer,
+  ProbabilisticLearnedReceiver,
+  type LearnedReceiverOptions,
+  type SoftPacketResult,
+  type LearnedDecodeResult,
+} from "./learned-receiver";
+export {
+  BASELINE_SPECS,
+  applyWienerFilter,
+  applyBilateralFilter,
+  evaluateBaseline,
+  type BaselineId,
+  type BaselineSpec,
+  type BaselineResult,
+} from "./baseline-ladder";
+export {
+  runExperimentABlurSweep,
+  runExperimentBGlareSweep,
+  runExperimentCDeadlineSimulation,
+  type BlurSweepPoint,
+  type GlareSweepPoint,
+  type DeadlineSimulationResult,
+} from "./learned-bench";
 
