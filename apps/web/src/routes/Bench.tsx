@@ -15,21 +15,23 @@ import { formatBytes } from "../lib/bytes";
 import { session, useSession } from "../lib/session";
 import { CameraError, feedFrames, lockCameraSettings, openCamera, qrDetector, setTorch, stopStream, torchSupported, watchQrCodes } from "../lib/camera";
 import { TorchWatcher } from "../components/TorchWatcher";
+import { LearnedBenchmarkPanel } from "../components/learned-benchmark-panel";
 import { TorchPlayer, type TorchMessage } from "@sealed/core";
 import type { FromBenchWorker, ToBenchWorker } from "../workers/bench.worker";
 
-type Role = "film" | "show";
+type Role = "film" | "show" | "research";
 export function BenchPage() {
   const [role, setRole] = useState<Role>("film");
   return (
     <div className="stack-lg">
       <PageTitle eyebrow="Benchmark">Measure an offline transfer</PageTitle>
-      <p className="muted">One device shows a test stream, the other films it. Then switch roles to measure the other direction.</p>
+      <p className="muted">One device shows a test stream, the other films it. Or run the Research Proposal Simulation Suite offline.</p>
       <div className="radio-row" role="radiogroup" aria-label="Role">
         {(
           [
             ["film", "Film"],
             ["show", "Show"],
+            ["research", "Research Simulation"],
           ] as const
         ).map(([v, l]) => (
           <label key={v}>
@@ -38,7 +40,7 @@ export function BenchPage() {
           </label>
         ))}
       </div>
-      {role === "show" ? <ShowStream /> : <FilmStream />}
+      {role === "show" ? <ShowStream /> : role === "film" ? <FilmStream /> : <LearnedBenchmarkPanel />}
     </div>
   );
 }

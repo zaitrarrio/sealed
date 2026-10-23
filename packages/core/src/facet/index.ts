@@ -104,11 +104,19 @@ export {
   type BaselineResult,
 } from "./baseline-ladder";
 export {
+  LearnedTransferSender,
+  LearnedTransferReceiver,
+} from "./learned-transfer";
+export {
   runExperimentABlurSweep,
   runExperimentBGlareSweep,
   runExperimentCDeadlineSimulation,
+  runActualTransferBenchmark,
+  runActualTransferSweep,
   type BlurSweepPoint,
   type GlareSweepPoint,
   type DeadlineSimulationResult,
+  type ActualTransferOptions,
+  type ActualTransferResult,
 } from "./learned-bench";
 

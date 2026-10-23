@@ -164,6 +164,12 @@ tasks:
     cmds:
       - pnpm bench:sweep {{.CLI_ARGS}}
 
+  bench:learned:
+    desc: "Learned Optical Transfer benchmark: Experiments A, B, C, identifiability, and baseline ladder B0-B6 (e.g. task bench:learned -- --quick)"
+    dir: packages/core
+    cmds:
+      - pnpm bench:learned {{.CLI_ARGS}}
+
   test:rust:
     desc: Rust sealed-core and sealed-facet unit tests
     cmds:

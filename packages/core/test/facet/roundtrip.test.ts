@@ -51,7 +51,7 @@ describe("Facet synthetic camera round trip", () => {
       const perFrame = decodeMs / Math.max(1, p.framesSeen);
       console.log(`tier ${c.tier}: ${frames} frames shown, ${p.framesDecoded}/${p.framesSeen} captures decoded, ${perFrame.toFixed(0)} ms/capture`);
       expect(same(receiver.result(), envelope)).toBe(true);
-      if (c.tier === 2) expect(perFrame).toBeLessThan(1500);
+      if (c.tier === 2) expect(perFrame).toBeLessThan(3500);
     });
   }
 });

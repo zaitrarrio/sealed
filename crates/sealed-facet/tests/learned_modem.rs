@@ -47,3 +47,67 @@ fn test_deadline_rate_ledger() {
     assert!(res.total_duration_seconds < 120.0);
     assert!(res.deadline_met);
 }
+
+#[test]
+fn benchmark_learned_modem_native() {
+    use std::time::Instant;
+    use sealed_facet::learned_modem::apply_wiener_deconvolution;
+
+    println!("\n=== Rust Native Learned Optical Modem Micro-Benchmarks ===");
+
+    // 1. GMI Golden-Section Search Bench
+    let mut bits = Vec::with_capacity(10_000);
+    let mut llrs = Vec::with_capacity(10_000);
+    for i in 0..10_000 {
+        let b = (i % 2) as u8;
+        bits.push(b);
+        let sign = if b == 1 { 1.0 } else { -1.0 };
+        llrs.push(sign * (7.0 + ((i % 17) as f64) * 0.1));
+    }
+
+    let start_gmi = Instant::now();
+    let (gmi, optimal_s) = calculate_gmi(&bits, &llrs);
+    let duration_gmi = start_gmi.elapsed();
+    println!(
+        "GMI Calculation (10,000 bits): {:.3} ms (GMI: {:.4}, s*: {:.4})",
+        duration_gmi.as_secs_f64() * 1000.0,
+        gmi,
+        optimal_s
+    );
+    assert!(gmi > 0.99);
+
+    // 2. 2D Wiener Deconvolution Filter Bench (112x112 tile field)
+    let w = 112;
+    let h = 112;
+    let mut luma = vec![0.5f64; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            luma[y * w + x] = ((x + y) % 2) as f64;
+        }
+    }
+
+    let start_wiener = Instant::now();
+    let iters = 50;
+    for _ in 0..iters {
+        let _ = apply_wiener_deconvolution(&luma, w, h, 0.04);
+    }
+    let duration_wiener = start_wiener.elapsed() / iters;
+    println!(
+        "Wiener 2D Deconvolution (112x112): {:.3} ms / frame ({:.1} fps)",
+        duration_wiener.as_secs_f64() * 1000.0,
+        1.0 / duration_wiener.as_secs_f64()
+    );
+
+    // 3. Two-cell Singularity & Separation Sweep
+    let start_singularity = Instant::now();
+    for i in 0..1000 {
+        let a = (i as f64) / 1000.0;
+        let _ = two_cell_separation_squared(a, 0.1);
+    }
+    let duration_singularity = start_singularity.elapsed();
+    println!(
+        "Singularity Evaluation (1,000 sweeps): {:.3} µs total",
+        duration_singularity.as_secs_f64() * 1_000_000.0
+    );
+    println!("==========================================================\n");
+}

@@ -8,6 +8,9 @@ import {
   runExperimentABlurSweep,
   runExperimentBGlareSweep,
   runExperimentCDeadlineSimulation,
+  runActualTransferBenchmark,
+  LearnedTransferSender,
+  LearnedTransferReceiver,
   TOTAL_PATCHES,
   PATCH_PAYLOAD_BYTES,
   type PatchPacket,
@@ -184,6 +187,45 @@ describe("Learned Optical Transfer Methodology", () => {
       expect(result.confidenceLowerBound95).toBeGreaterThan(0.95);
       expect(result.timeToEventProfile.acquisitionMs).toBeGreaterThan(0);
       expect(result.timeToEventProfile.transferMs).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Actual End-to-End Streaming Transfer", () => {
+    it("streams, decodes, and verifies data payload with LearnedTransferSender/Receiver", () => {
+      const data = new Uint8Array(192); // 4 RaptorQ symbols
+      for (let i = 0; i < data.length; i++) data[i] = (i * 19 + 7) & 0xff;
+
+      const sender = new LearnedTransferSender(data, 9999);
+      const receiver = new LearnedTransferReceiver();
+
+      // Preamble frame with descriptor
+      const f0 = sender.nextFrame(560);
+      expect(receiver.pushImage(f0.image)).toBe(true);
+      expect(receiver.isLocked).toBe(true);
+
+      // Data frame
+      const f1 = sender.nextFrame(560);
+      expect(receiver.pushImage(f1.image)).toBe(true);
+
+      expect(receiver.complete).toBe(true);
+      expect(receiver.progress.verified).toBe(true);
+      expect(receiver.result()).toEqual(data);
+    });
+
+    it("runs actual transfer benchmark through physics optical channel simulation", async () => {
+      const res = await runActualTransferBenchmark({
+        payloadBytes: 192,
+        modemType: "learned",
+        seed: 42,
+        frameSizePx: 560,
+        channel: { blurSigmaCells: 0.3, readNoise: 1.0, scale: 0.85 },
+      });
+
+      expect(res.verified).toBe(true);
+      expect(res.packetsRecovered).toBeGreaterThan(0);
+      expect(res.goodputBytesPerSecond).toBeGreaterThan(0);
+      expect(res.deadlineMet).toBe(true);
+      expect(res.sha256Hex.length).toBe(64);
     });
   });
 });
