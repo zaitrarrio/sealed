@@ -54,12 +54,14 @@ export interface ActualTransferOptions {
   displayFps?: number; // Nominal display update rate (e.g. 30, 60)
   maxFrames?: number;
   channel?: {
+    width?: number;
+    height?: number;
     blurSigmaCells?: number;
     readNoise?: number;
     shotNoiseScale?: number;
     rotationDeg?: number;
     scale?: number;
-    specularGlare?: { cx: number; cy: number; radiusPx: number; peak?: number } | null;
+    specularGlare?: { cx: number; cy: number; radiusPx: number; peak: number } | null;
   };
 }
 
