@@ -631,6 +631,7 @@ User file contents; file metadata (names, types, counts, sizes); identity relati
 | Acoustic eavesdropper (Air-gap secure) | Speaker plays only Envelope ciphertext and fountain symbols; CEK wrapped to receiver key from reverse-key scan; SAS stays visual while sound is the channel (ADR-0024) | Visual SAS skipped by users; room echo may jam |
 | Acoustic eavesdropper (Broadcast) | By design anyone who can hear the stream decrypts; travels further than a screen (around corners); stronger UI warning before playback | Intended |
 | Spoofed Broadcast publisher | Publisher signatures and pinned or fetched chains | Unverified broadcasts shown as unsigned |
+| Network attacker on paired call | Signed signaling binds DTLS fingerprints; HPKE Auth call key encrypts each encoded media frame (ADR-0013) | Platforms without encoded-frame encryption refuse the call |
 | Lost device, locked | Keys gated by biometric/passcode; hardware non-exportable | OS-level exploits |
 | Lost device, unlocked | Unwrap still requires biometric per transfer; remote revoke via sigchain | Files already exported |
 | Long-term key compromise | OPKs give forward secrecy for stored Paired deliveries; Direct uses per-transfer ephemeral sender keys | Unconsumed MPK window (≤ 14 days) |

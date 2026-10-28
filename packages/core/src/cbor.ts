@@ -269,6 +269,10 @@ export function getUint(m: CborMap, key: number | string, what: string): number 
   return v;
 }
 
+export function getOptUint(m: CborMap, key: number | string, what: string): number | undefined {
+  return m[String(key)] === undefined ? undefined : getUint(m, key, what);
+}
+
 export function getText(m: CborMap, key: number | string, what: string): string {
   const v = m[String(key)];
   if (typeof v !== "string") throw new CborError(`${what}: field ${key} must be text`);

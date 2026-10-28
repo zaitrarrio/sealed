@@ -14,17 +14,29 @@ When two Paired contacts are both online, a live transfer avoids storing ciphert
 - Flow control: one ordered, reliable channel, 64 KiB messages, backpressure on `bufferedAmount`; resume from the last fully verified segment after reconnect.
 - If ICE fails or the transfer stalls for 15 seconds, the sender falls back to uploading to the mailbox and the receiver switches to download — without user action.
 
+### Paired calls (voice)
+
+Files already have a second encryption layer (the Envelope). Voice does not, so DTLS-SRTP alone is not enough against a broken WebRTC hop.
+
+- Signed offer/answer MAY set `call: true` and carry an HPKE Auth wrap of a 32-byte call key (`callWrap`) bound to the 16-byte signaling session (`wrapInfo` kind `call`).
+- Each encoded media frame (Opus packet) is sealed with AES-256-GCM under that call key and a monotonic counter nonce. Platforms that cannot encrypt encoded frames MUST refuse the call rather than fall back to SRTP alone.
+- A data-only peer MUST reject `call: true` offers it cannot handle; hangup reuses `bye`.
+- Call sessions are Paired-only (pinned identities). Non-pinned peers are rejected.
+
 ## Alternatives considered
 
 - **Relay-only streaming via WebSockets.** Simpler; doubles bandwidth through the relay. Rejected as the default, used as fallback.
 - **QUIC / WebTransport peer-to-peer.** Not available peer-to-peer in browsers. Rejected for now.
+- **SRTP alone for calls.** Sufficient against the TURN server; insufficient if the DTLS hop is compromised. Rejected for Sealed's threat model.
 
 ## Consequences
 
 - LAN transfers between contacts can exceed what the relay would deliver, with no bytes stored.
+- Calls share the signed signaling path with live file transfer; the `call` flag prevents silent upgrade of a data session.
 
 ## Verification
 
 - `live/fingerprint`: a signaling payload with a mismatched DTLS fingerprint aborts the session.
 - `live/fallback`: forced ICE failure completes the transfer via mailbox with identical Envelope hash.
 - `live/resume`: killing the channel mid-transfer resumes from the last verified segment.
+- `acoustic/call`: call-key wrap round trip; frame seal/open; mismatched fingerprint; wrong-sender unwrap fails.

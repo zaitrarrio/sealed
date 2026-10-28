@@ -4,7 +4,7 @@
  * the same Envelope bytes as stored delivery, framed as CBOR messages of at most 64 KiB.
  */
 import { ctEqual } from "../bytes";
-import { asMap, decodeCbor, encodeCbor, getBytes, getOptText, getText, getUint } from "../cbor";
+import { asMap, decodeCbor, encodeCbor, getBytes, getOptBytes, getOptText, getOptUint, getText, getUint } from "../cbor";
 import type { SigningKey } from "../crypto/keys";
 import { randomBytes } from "../crypto/primitives";
 import { signObject, verifyObject } from "../crypto/sig";
@@ -20,10 +20,26 @@ export interface SignalMessage {
   /** DTLS certificate fingerprint ("sha-256 AB:CD:…") for offer/answer. */
   dtlsFingerprint?: string;
   transferId?: string;
+  /**
+   * Paired call (ADR-0013): when true the session carries encrypted voice, not a file data channel.
+   * A data-only peer MUST reject offers with call=true it cannot handle.
+   */
+  call?: boolean;
+  /** HPKE Auth wrap of the 32-byte call key (present on call offers/answers). */
+  callWrap?: Uint8Array;
 }
 
 function signalObject(m: SignalMessage) {
-  return { 1: m.kind, 2: m.session, 3: m.ts, 4: m.body, 5: m.dtlsFingerprint, 6: m.transferId };
+  return {
+    1: m.kind,
+    2: m.session,
+    3: m.ts,
+    4: m.body,
+    5: m.dtlsFingerprint,
+    6: m.transferId,
+    8: m.call ? 1 : undefined,
+    9: m.callWrap,
+  };
 }
 
 export async function encodeSignal(key: SigningKey, m: SignalMessage): Promise<Uint8Array> {
@@ -38,7 +54,18 @@ export function decodeSignal(bytes: Uint8Array, senderSigningPublic: Uint8Array,
   if (!["offer", "answer", "ice", "bye"].includes(kind)) throw new Error("unknown signal kind");
   const dtls = getOptText(m, 5, "signal");
   const tid = getOptText(m, 6, "signal");
-  const msg: SignalMessage = { kind, session: getBytes(m, 2, "signal", 16), ts: getUint(m, 3, "signal"), body: getText(m, 4, "signal"), ...(dtls ? { dtlsFingerprint: dtls } : {}), ...(tid ? { transferId: tid } : {}) };
+  const callFlag = getOptUint(m, 8, "signal");
+  const callWrap = getOptBytes(m, 9, "signal");
+  const msg: SignalMessage = {
+    kind,
+    session: getBytes(m, 2, "signal", 16),
+    ts: getUint(m, 3, "signal"),
+    body: getText(m, 4, "signal"),
+    ...(dtls ? { dtlsFingerprint: dtls } : {}),
+    ...(tid ? { transferId: tid } : {}),
+    ...(callFlag === 1 ? { call: true } : {}),
+    ...(callWrap ? { callWrap: callWrap.slice() } : {}),
+  };
   if (!verifyObject(senderSigningPublic, "signal", signalObject(msg), getBytes(m, 7, "signal", 64))) throw new Error("signal signature invalid");
   if (Math.abs(now - msg.ts) > maxAgeSeconds) throw new Error("signal is stale");
   return msg;

@@ -1,5 +1,5 @@
 /**
- * Acoustic transport (ADR-0024): speaker → microphone file transfer.
+ * Acoustic transport (ADR-0024): speaker → microphone file transfer, plus paired call frame crypto.
  */
 export {
   PROFILE_A0,
@@ -42,3 +42,15 @@ export {
   openAcousticEnvelope,
   type OpenedAcoustic,
 } from "./flows";
+export {
+  CALL_KEY_BYTES,
+  CALL_NONCE_BYTES,
+  createCallKeyMaterial,
+  unwrapCallKey,
+  callNonce,
+  sealCallFrame,
+  openCallFrame,
+  encodeCallOffer,
+  decodeCallOffer,
+  callInfoBytes,
+} from "./call";

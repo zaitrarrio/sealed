@@ -12,7 +12,9 @@ export type WrapContext =
   | { kind: "direct"; transferId: Uint8Array }
   | { kind: "paired"; transferId: Uint8Array; prekeyId: Uint8Array }
   | { kind: "airgap"; streamId: Uint8Array }
-  | { kind: "local"; fileId: Uint8Array };
+  | { kind: "local"; fileId: Uint8Array }
+  /** Paired live call key (ADR-0013); sessionId is the 16-byte WebRTC signaling session. */
+  | { kind: "call"; sessionId: Uint8Array };
 
 export function wrapInfo(ctx: WrapContext): Uint8Array {
   switch (ctx.kind) {
@@ -24,6 +26,8 @@ export function wrapInfo(ctx: WrapContext): Uint8Array {
       return concat(utf8("sealed/v1/airgap"), ctx.streamId);
     case "local":
       return concat(utf8("sealed/v1/local"), ctx.fileId);
+    case "call":
+      return concat(utf8("sealed/v1/call"), ctx.sessionId);
   }
 }
 
