@@ -12,7 +12,7 @@ Every mode answers the same two questions: how do the bytes move, and who is all
 
 The system is built from two orthogonal primitives, and every mode is a configuration of them.
 
-1. **Transport** — how ciphertext moves: `stored` (relay object storage), `live` (WebRTC data channel), or `optical` (Facet frame stream, ADR-0008).
+1. **Transport** — how ciphertext moves: `stored` (relay object storage), `live` (WebRTC data channel), `optical` (Facet frame stream, ADR-0008), or `acoustic` (speaker-to-microphone modem, ADR-0024).
 2. **Trust** — how the content key reaches a recipient: `claim` (one-time scanned secret plus sender approval, ADR-0004), `pinned` (keys exchanged at an earlier in-person pairing, ADR-0006), `reverse-optical` (recipient key captured by the sender's camera), or `open` (no recipient binding; publisher signature only).
 
 | Mode | Transport | Trust | Recipients |
@@ -20,8 +20,8 @@ The system is built from two orthogonal primitives, and every mode is a configur
 | Direct | stored → optical fallback | claim | 1 |
 | Room | stored | claim (multi-use, windowed) | N |
 | Paired | live or stored | pinned | 1 contact, all devices |
-| Air-gap | optical | reverse-optical or pinned | 1 |
-| Broadcast | optical | open (signed) | anyone in view |
+| Air-gap | optical or acoustic | reverse-optical or pinned | 1 |
+| Broadcast | optical or acoustic | open (signed) | anyone in view / earshot |
 
 All modes share one content format (the Envelope, ADR-0003), one crypto suite (ADR-0002) and one Rust core (ADR-0011). The UI exposes two actions — **Share** and **Share offline** — and resolves the mode from context: a second scanner turns Direct into Room; a pinned contact selects Paired; no network selects an optical mode.
 

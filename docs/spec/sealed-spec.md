@@ -628,6 +628,8 @@ User file contents; file metadata (names, types, counts, sizes); identity relati
 | Network attacker on live transfer | Signed signaling binds DTLS fingerprints; Envelope encryption end-to-end | None for content |
 | Optical eavesdropper (Air-gap secure) | Stream is ciphertext; CEK wrapped to receiver key captured before streaming | Visual SAS skipped by users |
 | Optical eavesdropper (Broadcast) | By design anyone in view decrypts; explicit warning | Intended |
+| Acoustic eavesdropper (Air-gap secure) | Speaker plays only Envelope ciphertext and fountain symbols; CEK wrapped to receiver key from reverse-key scan; SAS stays visual while sound is the channel (ADR-0024) | Visual SAS skipped by users; room echo may jam |
+| Acoustic eavesdropper (Broadcast) | By design anyone who can hear the stream decrypts; travels further than a screen (around corners); stronger UI warning before playback | Intended |
 | Spoofed Broadcast publisher | Publisher signatures and pinned or fetched chains | Unverified broadcasts shown as unsigned |
 | Lost device, locked | Keys gated by biometric/passcode; hardware non-exportable | OS-level exploits |
 | Lost device, unlocked | Unwrap still requires biometric per transfer; remote revoke via sigchain | Files already exported |

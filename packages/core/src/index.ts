@@ -21,3 +21,4 @@ export * from "./protocol/live";
 export * from "./sync/contacts";
 export * from "./fec/index";
 export * from "./facet/index";
+export * from "./acoustic/index";
