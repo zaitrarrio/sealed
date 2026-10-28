@@ -37,7 +37,7 @@ const PERM_PRIME = 7;
  * Fully compatible with FacetStream rendering.
  */
 export class LearnedTransferSender {
-  readonly tier: Tier = 4;
+  readonly tier: Tier = 5;
   readonly finished = false;
   readonly oti: Oti;
   readonly encoder: RaptorQEncoder;
@@ -76,7 +76,7 @@ export class LearnedTransferSender {
   next(): FacetFrame {
     const seq = this.sequence++;
     return {
-      tier: 4,
+      tier: 5,
       type: "data",
       holdRefreshes: 2, // 30 fps on 60 Hz display, 60 fps on 120 Hz display
       sequence: seq,

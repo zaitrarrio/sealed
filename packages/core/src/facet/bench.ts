@@ -16,6 +16,7 @@ import { TIERS } from "./tiers";
 import type { RgbaImage, Tier } from "./types";
 import type { GridFrameDecoder, NativePixelFormat } from "./native";
 import { PatchSender, PatchReceiver } from "./patch-stream";
+import { LearnedTransferSender, LearnedTransferReceiver } from "./learned-transfer";
 import { PATCH_PAYLOAD_BYTES, rawToRgba } from "./patch-modem";
 
 const NAME = /^sealed-bench-(\d{1,10})-(\d{1,9})\.bin$/;
@@ -46,7 +47,7 @@ export function parseBenchmarkFileName(name: string): { seed: number; size: numb
 }
 
 export interface BenchmarkStream {
-  sender: FacetSender | PatchSender;
+  sender: FacetSender | PatchSender | LearnedTransferSender;
   seed: number;
   size: number;
   tier: Tier;
@@ -59,6 +60,10 @@ export async function prepareBenchmarkStream(o: { size: number; tier: Tier; seed
   const seed = (o.seed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0;
   const data = benchmarkPayload(seed, o.size);
   const qr = { symbolSize: o.qr?.symbolSize ?? TIERS[0].symbolSize, holdRefreshes60: o.qr?.holdRefreshes60 ?? TIERS[0].holdRefreshes60 };
+  if (o.tier === 5) {
+    const sender = new LearnedTransferSender(data, seed);
+    return { sender, seed, size: o.size, tier: 5, qr };
+  }
   if (o.tier === 4) {
     const sender = new PatchSender(data, seed);
     return { sender, seed, size: o.size, tier: 4, qr };
@@ -111,6 +116,7 @@ export interface BenchmarkReport {
 export class BenchmarkMeter {
   private readonly receiver = new FacetReceiver();
   private readonly patchReceiver = new PatchReceiver();
+  private readonly learnedReceiver = new LearnedTransferReceiver();
   private inputs = 0;
   private startedAt: number | null = null;
   private firstValidAt: number | null = null;
@@ -126,7 +132,7 @@ export class BenchmarkMeter {
   constructor(private readonly now: () => number = () => (typeof performance !== "undefined" ? performance.now() : Date.now())) {}
 
   get complete(): boolean {
-    return this.completeAt !== null || this.patchReceiver.complete;
+    return this.completeAt !== null || this.learnedReceiver.complete || this.patchReceiver.complete;
   }
 
   pushCode(content: string | Uint8Array): void {
@@ -182,7 +188,7 @@ export class BenchmarkMeter {
       return;
     }
 
-    // Native not available: fallback to JavaScript decoders
+    // Native not available: try baseline patch modem (T4), then learned receiver (T5), then grid/QR (T0-T3)
     this.inputs++;
     const patchOk = this.patchReceiver.pushImage(image, t0);
     if (patchOk) {
@@ -191,6 +197,17 @@ export class BenchmarkMeter {
         this.completeAt ??= t0;
         this.verified = this.patchReceiver.progress.verified;
         this.payloadBytes = this.patchReceiver.progress.payloadBytes;
+      }
+      return;
+    }
+
+    const learnedOk = this.learnedReceiver.pushImage(image, t0);
+    if (learnedOk) {
+      if (this.firstValidAt === null) this.firstValidAt = t0;
+      if (this.learnedReceiver.complete) {
+        this.completeAt ??= t0;
+        this.verified = this.learnedReceiver.progress.verified;
+        this.payloadBytes = this.learnedReceiver.progress.payloadBytes;
       }
       return;
     }
@@ -243,7 +260,7 @@ export class BenchmarkMeter {
       return;
     }
 
-    // Fallback if native is unavailable: downscale raw buffer and run pure JS patch modem
+    // Fallback if native is unavailable: downscale raw buffer and run pure JS decoders
     this.inputs++;
     const img = rawToRgba(data, width, height, stride, format, 720);
     if (this.patchReceiver.pushImage(img, t0)) {
@@ -252,6 +269,16 @@ export class BenchmarkMeter {
         this.completeAt ??= t0;
         this.verified = this.patchReceiver.progress.verified;
         this.payloadBytes = this.patchReceiver.progress.payloadBytes;
+      }
+      return;
+    }
+
+    if (this.learnedReceiver.pushImage(img, t0)) {
+      if (this.firstValidAt === null) this.firstValidAt = t0;
+      if (this.learnedReceiver.complete) {
+        this.completeAt ??= t0;
+        this.verified = this.learnedReceiver.progress.verified;
+        this.payloadBytes = this.learnedReceiver.progress.payloadBytes;
       }
       return;
     }
@@ -303,6 +330,48 @@ export class BenchmarkMeter {
     const elapsed = this.startedAt === null ? 0 : t - this.startedAt;
     const secs = elapsed / 1000;
 
+    const learnedProg = this.learnedReceiver.progress;
+    if (learnedProg.isLocked) {
+      const stage: BenchmarkStage =
+        this.inputs === 0
+          ? "no-input"
+          : learnedProg.verified === true
+            ? "verified"
+            : learnedProg.verified === false
+              ? "failed"
+              : learnedProg.complete
+                ? "complete"
+                : "receiving";
+
+      return {
+        stage,
+        verdict:
+          stage === "verified"
+            ? "Received and verified byte for byte via T5 Learned Optical Modem."
+            : learnedProg.packetsReceived > 0
+              ? `Locked: T5 Learned Optical Modem (${learnedProg.packetsReceived} packets, ${learnedProg.glareErasures} erasures, GMI ${learnedProg.meanGmi.toFixed(2)}, goodput ${(learnedProg.goodputBytesPerSecond / 1024).toFixed(1)} KB/s)`
+              : "Transmission locked: T5 Learned Optical Modem (anchors acquired)",
+        tier: 5,
+        symbolSize: PATCH_PAYLOAD_BYTES,
+        payloadBytes: learnedProg.payloadBytes,
+        inputs: this.inputs,
+        validFrames: learnedProg.packetsReceived,
+        symbolsReceived: learnedProg.packetsReceived,
+        symbolsNeeded: learnedProg.packetsNeeded,
+        fraction: learnedProg.fraction,
+        elapsedMs: Math.round(elapsed),
+        timeToFirstFrameMs: this.firstValidAt === null || this.startedAt === null ? null : Math.round(this.firstValidAt - this.startedAt),
+        inputsPerSecond: secs > 0 ? this.inputs / secs : 0,
+        validFramesPerSecond: secs > 0 ? learnedProg.packetsReceived / secs : 0,
+        goodputBytesPerSecond: learnedProg.goodputBytesPerSecond,
+        recentLoss: null,
+        decodeMsPerFrame: this.nativeMs.length ? this.nativeMs.reduce((a, b) => a + b, 0) / this.nativeMs.length : null,
+        decoder: this.native ? "native" : "javascript",
+        verified: learnedProg.verified,
+        error: this.error,
+      };
+    }
+
     const patchProg = this.patchReceiver.progress;
     if (patchProg.isLocked) {
       const stage: BenchmarkStage =
@@ -320,10 +389,10 @@ export class BenchmarkMeter {
         stage,
         verdict:
           stage === "verified"
-            ? "Received and verified byte for byte via Monochrome Patch Modem."
+            ? "Received and verified byte for byte via T4 Monochrome Patch Modem."
             : patchProg.packetsReceived > 0
-              ? `Locked: Monochrome Patch Modem (${patchProg.packetsReceived} packets, ${patchProg.glareErasures} erasures, goodput ${(patchProg.goodputBytesPerSecond / 1024).toFixed(1)} KB/s)`
-              : "Transmission locked: Monochrome Patch Modem (anchors acquired)",
+              ? `Locked: T4 Monochrome Patch Modem (${patchProg.packetsReceived} packets, ${patchProg.glareErasures} erasures, goodput ${(patchProg.goodputBytesPerSecond / 1024).toFixed(1)} KB/s)`
+              : "Transmission locked: T4 Monochrome Patch Modem (anchors acquired)",
         tier: 4,
         symbolSize: PATCH_PAYLOAD_BYTES,
         payloadBytes: patchProg.payloadBytes,

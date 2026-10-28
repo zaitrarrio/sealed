@@ -40,12 +40,13 @@ export const TIERS: Record<Tier, TierSpec> = {
   2: { tier: 2, grid: 112, bitsPerCell: 7, colors: 8, dataFps: 15, holdRefreshes60: 4, symbolSize: 8280, rsN: 255, rsK: 207, codewords: 40, maxSourceSymbolsPerBlock: 256 },
   3: { tier: 3, grid: 144, bitsPerCell: 7, colors: 8, dataFps: 20, holdRefreshes60: 3, symbolSize: 14072, rsN: 255, rsK: 207, codewords: 68, maxSourceSymbolsPerBlock: 192 },
   4: { tier: 4, grid: 112, bitsPerCell: 1, colors: 2, dataFps: 30, holdRefreshes60: 2, symbolSize: 48, rsN: 0, rsK: 0, codewords: 16, maxSourceSymbolsPerBlock: 256 },
+  5: { tier: 5, grid: 112, bitsPerCell: 1, colors: 2, dataFps: 30, holdRefreshes60: 2, symbolSize: 48, rsN: 0, rsK: 0, codewords: 16, maxSourceSymbolsPerBlock: 256 },
 };
 
 export type GridTier = 1 | 2 | 3;
 
 export function isTier(v: number): v is Tier {
-  return v === 0 || v === 1 || v === 2 || v === 3 || v === 4;
+  return v === 0 || v === 1 || v === 2 || v === 3 || v === 4 || v === 5;
 }
 
 /** Receiver requirements per tier (spec §7.7). */

@@ -23,7 +23,7 @@ import { session, useSession } from "../src/lib/session";
 import { Button, Card, Notice, P, Progress, Row, Screen, Segmented, Stack, Title, errorMessage, fonts } from "../src/ui/kit";
 
 type Role = "show" | "film";
-type TierChoice = "0" | "1" | "2" | "3" | "4";
+type TierChoice = "0" | "1" | "2" | "3" | "4" | "5";
 
 function deviceLine(): string {
   return `${Device.manufacturer ?? ""} ${Device.modelName ?? "phone"} · ${Platform.OS} ${Device.osVersion ?? ""}`.replace(/\s+/g, " ").trim();
@@ -53,7 +53,7 @@ function ShowStream() {
   const s = useSession();
   const saved = qrStreamSetting(s.settings.qrStream);
   const [size, setSize] = useState<string>(String(BENCHMARK_SIZES[1]));
-  const [tier, setTier] = useState<TierChoice>("4");
+  const [tier, setTier] = useState<TierChoice>("5");
   const [qrSize, setQrSize] = useState<string>(String(saved.symbolSize));
   const [codes, setCodes] = useState<"1" | "2" | "4">(String(saved.codesPerScreen) as "1" | "2" | "4");
   const [hold, setHold] = useState<string>(String(saved.holdRefreshes60));
@@ -69,9 +69,11 @@ function ShowStream() {
     const profile =
       stream.tier === 0
         ? `QR ${stream.qr.symbolSize} B × ${codes} at ${fps}/s`
-        : stream.tier === 4
-          ? "T4 · Monochrome Patch Modem (Proposal)"
-          : `T${stream.tier}`;
+        : stream.tier === 5
+          ? "T5 · Learned Optical Modem (Learned Grid)"
+          : stream.tier === 4
+            ? "T4 · Monochrome Patch Modem (Baseline)"
+            : `T${stream.tier}`;
     return (
       <View style={{ gap: 12 }}>
         <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? Number(codes) : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} reduceMotion={s.settings.reduceMotion ?? false} />
@@ -89,17 +91,21 @@ function ShowStream() {
         value={tier}
         onChange={setTier}
         options={[
-          ["4", "T4 Patch (Proposal)"],
+          ["5", "T5 Learned Grid"],
+          ["4", "T4 Patch (Baseline)"],
           ["0", "QR"],
           ["1", "T1 grid"],
           ["2", "T2"],
           ["3", "T3"],
         ]}
       />
-      {tier === "4" ? (
+      {tier === "5" ? (
         <P tone="subtle">
-          Monochrome Patch Modem (Proposal 21 Oct 2026): binary black &amp; white cells, 16 independent packets, local timing pilots,
-          localized glare-to-erasures, and RaptorQ fountain coding. Immune to color blending and glare.
+          T5 Learned Optical Modem (Learned Grid): Joint constrained waveform projection (Walsh-Hadamard), prime-step spatial interleaving, 2D deconvolution, residual neural equalizer with soft LLRs, and localized glare erasures.
+        </P>
+      ) : tier === "4" ? (
+        <P tone="subtle">
+          T4 Monochrome Patch Modem (Oct 21 Baseline): Hard-threshold binarization over 16 monochrome patches. Vulnerable to optical blur without neural equalization.
         </P>
       ) : tier === "0" ? (
         <>

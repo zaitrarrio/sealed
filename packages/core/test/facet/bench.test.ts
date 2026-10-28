@@ -113,4 +113,34 @@ describe("optical benchmark", () => {
     expect(r.payloadBytes).toBe(size);
     expect(r.tier).toBe(4);
   });
+
+  it("streams and verifies Tier 5 Learned Optical Modem through BenchmarkMeter", async () => {
+    const c = clock(33);
+    const meter = new BenchmarkMeter(c.now);
+
+    const { sender, size } = await prepareBenchmarkStream({ size: 16 * 1024, tier: 5, seed: 5555 });
+    expect(sender.tier).toBe(5);
+
+    for (let i = 0; i < 400 && !meter.complete; i++) {
+      const frame = sender.next();
+      const img = sender.render(frame, 560);
+      meter.pushImage(img);
+      c.tick();
+      if (i === 1) {
+        const rep = meter.report();
+        expect(rep.stage).toBe("receiving");
+        expect(rep.tier).toBe(5);
+      }
+    }
+
+    expect(meter.complete).toBe(true);
+    await meter.finished();
+    const r = meter.report();
+    expect(r.stage).toBe("verified");
+    expect(r.verified).toBe(true);
+    expect(r.payloadBytes).toBe(size);
+    expect(r.tier).toBe(5);
+    expect(r.goodputBytesPerSecond).toBeGreaterThan(0);
+    expect(r.verdict).toContain("Learned Optical Modem");
+  });
 });

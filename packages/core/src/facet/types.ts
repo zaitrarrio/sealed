@@ -3,7 +3,7 @@
  * depend only on these types; the implementation lives alongside in this folder.
  */
 
-export type Tier = 0 | 1 | 2 | 3 | 4;
+export type Tier = 0 | 1 | 2 | 3 | 4 | 5;
 
 /** An RGBA image, 4 bytes per pixel, row-major, as produced by canvas getImageData or a camera frame. */
 export interface RgbaImage {

@@ -49,7 +49,7 @@ function ShowStream() {
   const s = useSession();
   const saved = qrStreamSetting(s.settings.qrStream);
   const [size, setSize] = useState<number>(BENCHMARK_SIZES[1]);
-  const [tier, setTier] = useState<Tier>(4);
+  const [tier, setTier] = useState<Tier>(5);
   const [qrSize, setQrSize] = useState<number>(saved.symbolSize);
   const [codes, setCodes] = useState<number>(saved.codesPerScreen);
   const [hold, setHold] = useState<number>(saved.holdRefreshes60);
@@ -64,9 +64,11 @@ function ShowStream() {
     const profile =
       stream.tier === 0
         ? `QR ${stream.qr.symbolSize} B × ${codes} at ${60 / stream.qr.holdRefreshes60}/s`
-        : stream.tier === 4
-          ? "T4 · Monochrome Patch Modem (Proposal)"
-          : `T${stream.tier}`;
+        : stream.tier === 5
+          ? "T5 · Learned Optical Modem (Learned Grid)"
+          : stream.tier === 4
+            ? "T4 · Monochrome Patch Modem (Baseline)"
+            : `T${stream.tier}`;
     return (
       <div className="stack">
         <FacetStream sender={stream.sender} codesPerScreen={stream.tier === 0 ? codes : 1} caption={`bench ${profile} · ${formatBytes(stream.size)}`} onStop={() => setStream(null)} />
@@ -90,17 +92,21 @@ function ShowStream() {
       <label className="field">
         Stream type
         <select value={tier} onChange={(e) => setTier(Number(e.target.value) as Tier)}>
-          <option value={4}>T4 — Monochrome Patch Modem (Proposal 21 Oct 2026)</option>
+          <option value={5}>T5 — Learned Optical Modem (Learned Grid: Walsh-Hadamard + Neural Equalizer)</option>
+          <option value={4}>T4 — Monochrome Patch Modem (Oct 21 Baseline: Hard Thresholding)</option>
           <option value={0}>T0 — QR (every phone and browser)</option>
           <option value={1}>T1 — colour grid (experimental)</option>
           <option value={2}>T2 — colour grid (experimental)</option>
           <option value={3}>T3 — colour grid (experimental)</option>
         </select>
       </label>
-      {tier === 4 ? (
+      {tier === 5 ? (
         <p className="subtle">
-          Monochrome binary spatial modulation (Engineering Proposal 21 Oct 2026): 16 independent patches, local timing pilots,
-          localized glare-to-erasures, and RaptorQ fountain coding. Zero color blending, maximum contrast ratio, orientation-invariant.
+          <strong>T5 Learned Optical Modem (Learned Grid)</strong>: Joint constrained waveform projection (Walsh-Hadamard), prime-step spatial interleaving, 2D deconvolution, residual neural equalizer with soft LLR output, and localized specular glare erasures. Designed for &ge; 11.51 Mbps net goodput.
+        </p>
+      ) : tier === 4 ? (
+        <p className="subtle">
+          <strong>T4 Monochrome Patch Modem (Oct 21 Baseline)</strong>: Naive hard-threshold binarization over 16 monochrome patches. Vulnerable to severe optical blur without neural equalization.
         </p>
       ) : tier === 0 ? (
         <>
