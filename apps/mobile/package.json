@@ -33,6 +33,7 @@
     "@sealed/tokens": "workspace:*",
     "@shopify/react-native-skia": "2.6.2",
     "expo": "57.0.27",
+    "expo-av": "~16.0.8",
     "expo-brightness": "~57.0.2",
     "expo-build-properties": "~57.0.22",
     "expo-clipboard": "~57.0.2",

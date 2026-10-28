@@ -1,17 +1,19 @@
 /**
  * Automatic mode resolution (spec §3.2). The UI exposes Send and Receive; this module picks Direct, Room,
- * Air-gap, or Broadcast from connectivity and a small set of plain-language toggles.
+ * Air-gap, or Broadcast from connectivity and a small set of plain-language toggles. Offline channel
+ * (screen vs sound) is chosen at send time; trust mode stays Air-gap or Broadcast (ADR-0001, ADR-0024).
  */
 export type ResolvedSendMode = "direct" | "room" | "airgap" | "broadcast";
+export type OfflineChannel = "optical" | "acoustic";
 
 export interface SendIntent {
   /** Relay reachable within the probe window. */
   online: boolean;
   /** "Allow multiple people" toggle. */
   allowRoom: boolean;
-  /** User chose offline / optical streaming. */
+  /** User chose offline / optical or acoustic streaming. */
   preferOffline: boolean;
-  /** Offline + "Anyone watching" (open stream). */
+  /** Offline + "Anyone watching / listening" (open stream). */
   anyoneWatching: boolean;
 }
 
@@ -26,16 +28,16 @@ export function resolveSendMode(intent: SendIntent): ResolvedSendMode {
 }
 
 /** Human label for the resolved mode (no jargon). */
-export function sendModeLabel(mode: ResolvedSendMode): string {
+export function sendModeLabel(mode: ResolvedSendMode, channel: OfflineChannel = "optical"): string {
   switch (mode) {
     case "direct":
       return "Send to one person nearby";
     case "room":
       return "Send to everyone who scans";
     case "airgap":
-      return "Send through the screen (secure)";
+      return channel === "acoustic" ? "Send through the speaker (secure)" : "Send through the screen (secure)";
     case "broadcast":
-      return "Send through the screen (anyone watching)";
+      return channel === "acoustic" ? "Send through the speaker (anyone listening)" : "Send through the screen (anyone watching)";
   }
 }
 

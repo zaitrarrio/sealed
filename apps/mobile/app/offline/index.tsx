@@ -20,6 +20,7 @@ export default function OfflineHub() {
         <Button title="Receive offline" onPress={() => router.push("/offline/receive")} />
         <Button title="Receive a broadcast" tone="ghost" onPress={() => router.push("/broadcast/receive")} />
         <Button title="Benchmark" tone="ghost" onPress={() => router.push("/bench")} />
+        <Button title="Use sound instead" tone="ghost" onPress={() => router.push("/acoustic")} testID="open-acoustic" />
       </Row>
     </Screen>
   );

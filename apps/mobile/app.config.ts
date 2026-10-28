@@ -76,6 +76,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-router",
       "expo-secure-store",
       "expo-sharing",
+      "expo-av",
       [
         "expo-notifications",
         {
@@ -84,7 +85,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       ["expo-build-properties", { android: { minSdkVersion: 31 }, ios: {} }],
-      ["@config-plugins/react-native-webrtc", { cameraPermission: "Sealed uses the camera to scan codes.", microphonePermission: "Sealed does not record audio." }],
+      ["@config-plugins/react-native-webrtc", { cameraPermission: "Sealed uses the camera to scan codes.", microphonePermission: "Sealed listens through the microphone only while you receive a sound transfer." }],
       ["react-native-quick-crypto", { sodiumEnabled: false }],
       "expo-dev-client",
     ],

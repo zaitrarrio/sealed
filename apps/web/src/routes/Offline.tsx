@@ -77,6 +77,9 @@ export function OfflineHubPage() {
         <Link to="/broadcast/receive" className="btn ghost">
           Receive a broadcast
         </Link>
+        <Link to="/acoustic" className="btn ghost" data-testid="open-acoustic">
+          Use sound instead
+        </Link>
       </div>
     </div>
   );

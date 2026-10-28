@@ -24,6 +24,12 @@ const SendOfflinePage = lazy(() => offline().then((m) => ({ default: m.SendOffli
 const BroadcastSendPage = lazy(() => offline().then((m) => ({ default: m.BroadcastSendPage })));
 const BroadcastReceivePage = lazy(() => offline().then((m) => ({ default: m.BroadcastReceivePage })));
 const BenchPage = lazy(() => import("./routes/Bench").then((m) => ({ default: m.BenchPage })));
+const acoustic = () => import("./routes/Acoustic");
+const AcousticHubPage = lazy(() => acoustic().then((m) => ({ default: m.AcousticHubPage })));
+const AcousticSendPage = lazy(() => acoustic().then((m) => ({ default: m.AcousticSendPage })));
+const AcousticReceivePage = lazy(() => acoustic().then((m) => ({ default: m.AcousticReceivePage })));
+const AcousticBroadcastSendPage = lazy(() => acoustic().then((m) => ({ default: m.AcousticBroadcastSendPage })));
+const AcousticBroadcastReceivePage = lazy(() => acoustic().then((m) => ({ default: m.AcousticBroadcastReceivePage })));
 
 function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<Spinner label="Loading…" />}>{children}</Suspense>;
@@ -146,6 +152,11 @@ export const router = createBrowserRouter([
       { path: "offline/send", element: <Lazy><SendOfflinePage /></Lazy> },
       { path: "broadcast", element: <Lazy><BroadcastSendPage /></Lazy> },
       { path: "broadcast/receive", element: <Lazy><BroadcastReceivePage /></Lazy> },
+      { path: "acoustic", element: <Lazy><AcousticHubPage /></Lazy> },
+      { path: "acoustic/send", element: <Lazy><AcousticSendPage /></Lazy> },
+      { path: "acoustic/receive", element: <Lazy><AcousticReceivePage /></Lazy> },
+      { path: "acoustic/broadcast", element: <Lazy><AcousticBroadcastSendPage /></Lazy> },
+      { path: "acoustic/broadcast/receive", element: <Lazy><AcousticBroadcastReceivePage /></Lazy> },
       { path: "settings", element: <SettingsPage /> },
       { path: "bench", element: <Lazy><BenchPage /></Lazy> },
       { path: "security", element: <SecurityPage /> },
