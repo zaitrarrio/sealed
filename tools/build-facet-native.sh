@@ -8,6 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 out=crates/sealed-facet/dist
 module=apps/mobile/modules/sealed-facet
+target_dir="${CARGO_TARGET_DIR:-target}"
 case "${1:-}" in
   ios)
     rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios >/dev/null
@@ -15,10 +16,10 @@ case "${1:-}" in
       cargo build -p sealed-facet --release --target "$t"
     done
     mkdir -p "$out/sim-universal"
-    lipo -create target/aarch64-apple-ios-sim/release/libsealed_facet.a target/x86_64-apple-ios/release/libsealed_facet.a -output "$out/sim-universal/libsealed_facet.a"
+    lipo -create "$target_dir/aarch64-apple-ios-sim/release/libsealed_facet.a" "$target_dir/x86_64-apple-ios/release/libsealed_facet.a" -output "$out/sim-universal/libsealed_facet.a"
     rm -rf "$module/ios/SealedFacet.xcframework"
     xcodebuild -create-xcframework \
-      -library target/aarch64-apple-ios/release/libsealed_facet.a -headers crates/sealed-facet/include \
+      -library "$target_dir/aarch64-apple-ios/release/libsealed_facet.a" -headers crates/sealed-facet/include \
       -library "$out/sim-universal/libsealed_facet.a" -headers crates/sealed-facet/include \
       -output "$module/ios/SealedFacet.xcframework"
     echo "built $module/ios/SealedFacet.xcframework"
