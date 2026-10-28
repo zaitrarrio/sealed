@@ -1,6 +1,12 @@
 # Web client lifecycle (go-task). Run from apps/web or with `task -d apps/web <target>`.
 version: "3"
 
+includes:
+  core:
+    taskfile: ../../packages/core/Taskfile.yml
+    dir: ../../packages/core
+    internal: true
+
 vars:
   RELAY_DIR: ../../services/relay
 
@@ -68,7 +74,8 @@ tasks:
       - pnpm dev
 
   build:
-    desc: Typecheck and build the production bundle into dist/
+    desc: Build the native decoder, then typecheck and build the production bundle into dist/
+    deps: [core:build]
     cmds:
       - pnpm build
 

@@ -1,6 +1,6 @@
 /**
  * URL of the native grid decoder module (ADR-0023), resolved by Vite from @sealed/core's package exports and
- * emitted as an asset. Built by `task build:facet-wasm`; when the file is absent the import still resolves to a
+ * emitted as an asset. Built by `task core:build`; when the file is absent the import still resolves to a
  * URL that 404s, and the workers fall back to the JavaScript decoder.
  */
 // eslint-disable-next-line import/no-unresolved

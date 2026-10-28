@@ -1,0 +1,24 @@
+# @sealed/core lifecycle (go-task). Run from packages/core or with `task -d packages/core <target>`.
+version: "3"
+
+tasks:
+  build:
+    desc: Build the native grid decoder to WebAssembly (ADR-0023) into wasm/
+    cmds:
+      - bash ../../tools/build-facet-wasm.sh
+
+  build:ios:
+    desc: Cross-compile the native grid decoder into an xcframework (macOS with Xcode)
+    cmds:
+      - bash ../../tools/build-facet-native.sh ios
+
+  build:android:
+    desc: Cross-compile the native grid decoder into jniLibs (needs cargo-ndk and the Android NDK)
+    cmds:
+      - bash ../../tools/build-facet-native.sh android
+
+  check:wasm-budget:
+    desc: Fail if the gzipped native grid decoder exceeds 1.5 MiB (builds it first)
+    cmds:
+      - task: build
+      - bash ../../tools/check-wasm-budget.sh wasm

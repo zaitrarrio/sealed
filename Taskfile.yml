@@ -2,6 +2,7 @@
 version: "3"
 
 includes:
+  core: { taskfile: packages/core/Taskfile.yml, dir: packages/core }
   relay: { taskfile: services/relay/Taskfile.yml, dir: services/relay }
   web: { taskfile: apps/web/Taskfile.yml, dir: apps/web }
   mobile: { taskfile: apps/mobile/Taskfile.yml, dir: apps/mobile }
@@ -41,7 +42,7 @@ tasks:
       - task: mobile:setup
 
   build:
-    desc: Run all build tasks (relay, web, and mobile)
+    desc: Run all build tasks (relay, web, and mobile; web builds the core decoder first)
     cmds:
       - task: relay:build
       - task: web:build
@@ -52,20 +53,20 @@ tasks:
     cmds:
       - task: build
 
-  build:facet-wasm:
+  facet-wasm:build:
     desc: Build the native grid decoder to WebAssembly (ADR-0023) into packages/core/wasm
     cmds:
-      - bash tools/build-facet-wasm.sh
+      - task: core:build
 
   build:facet-ios:
     desc: Cross-compile the native grid decoder into an xcframework (macOS with Xcode)
     cmds:
-      - bash tools/build-facet-native.sh ios
+      - task: core:build:ios
 
   build:facet-android:
     desc: Cross-compile the native grid decoder into jniLibs (needs cargo-ndk and the Android NDK)
     cmds:
-      - bash tools/build-facet-native.sh android
+      - task: core:build:android
 
   fixtures:grid:
     desc: Generate grid-decoder parity fixtures (simulated captures with the JavaScript decoder's stage outputs)
@@ -178,8 +179,7 @@ tasks:
   check:wasm-budget:
     desc: Fail if the gzipped native grid decoder exceeds 1.5 MiB (builds it first)
     cmds:
-      - bash tools/build-facet-wasm.sh
-      - bash tools/check-wasm-budget.sh packages/core/wasm
+      - task: core:check:wasm-budget
 
   check:
     desc: Everything CI runs — typecheck, unit tests, rust, web e2e, mobile bundle
