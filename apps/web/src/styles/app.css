@@ -292,6 +292,23 @@ p {
   background: color-mix(in srgb, var(--success) 12%, var(--bg));
 }
 
+.arrival {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--amber) 55%, var(--line));
+  border-radius: var(--r-md);
+  background: var(--amber-soft);
+}
+
+.arrival .grow {
+  flex: 1;
+  min-width: 160px;
+}
+
 .list {
   margin-top: 4px;
   list-style: none;
@@ -353,6 +370,11 @@ p {
 
 .btn:active {
   transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .btn[disabled],

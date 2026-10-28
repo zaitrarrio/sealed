@@ -2,6 +2,7 @@
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { Link, NavLink, Outlet, createBrowserRouter, useNavigate, useRouteError } from "react-router";
 import { BrandMark, Spinner } from "./components/ui";
+import { InboxArrivalBanner } from "./components/inbox-arrival";
 import { attachInbox, refreshInbox, useInbox } from "./lib/inbox";
 import { session, useSession } from "./lib/session";
 import { ClaimPage } from "./routes/Claim";
@@ -14,6 +15,7 @@ import { PairPage } from "./routes/Pair";
 import { ReceivePage } from "./routes/Receive";
 import { SecurityPage, SettingsPage } from "./routes/Settings";
 import { CallContactPage, CallIncomingHost } from "./routes/Call";
+import { QuickSendPage } from "./routes/quick-send";
 import { SendToContactPage } from "./routes/SendToContact";
 import { SharePage } from "./routes/Share";
 
@@ -87,6 +89,7 @@ function Shell() {
         )}
       </header>
       <main id="main" className="main">
+        {s.status === "ready" && s.profile.fingerprint && <InboxArrivalBanner />}
         {s.status === "loading" && <Spinner label="Opening this device's keys…" />}
         {s.status === "error" && (
           <div className="notice danger" role="alert">
@@ -140,6 +143,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: "welcome", element: <OnboardingPage /> },
+      { path: "send", element: <QuickSendPage /> },
       { path: "share", element: <SharePage /> },
       { path: "receive", element: <ReceivePage /> },
       // Code landing paths (packages/core protocol/codes.ts): a phone's camera app opens these directly.

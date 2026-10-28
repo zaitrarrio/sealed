@@ -221,9 +221,8 @@ test.describe.serial("Sealed web client against a local relay", () => {
     await expect(A.page.getByText(/Switching to stored delivery/)).toBeVisible({ timeout: 40_000 });
     expect(Date.now() - started).toBeGreaterThanOrEqual(14_000);
     await expect(A.page.getByTestId("send-contact-done")).toContainText("inbox");
-    // The mailbox nudge on B's presence socket refreshes the inbox without a manual refresh.
-    await expect(B.page.getByTestId("inbox-item")).toHaveCount(1);
-    await B.page.getByTestId("open-inbox-item").click();
+    // The mailbox nudge on B's presence socket refreshes the inbox without a manual refresh, and the new item opens itself.
+    await expect(B.page.getByTestId("inbox-opened")).toBeVisible({ timeout: 20_000 });
     const got = await saveDownload(B.page, "save-0");
     expect(sha256(got)).toBe(sha256(payload));
   });

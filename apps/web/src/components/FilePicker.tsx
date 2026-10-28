@@ -30,7 +30,7 @@ export function FilePicker({ files, onChange, disabled = false }: { files: Picke
         }}
       >
         <p style={{ fontFamily: "var(--font-display)", fontSize: 22, marginBottom: 6 }}>Drop files or folders here</p>
-        <p className="subtle">Everything is encrypted in this browser before it leaves.</p>
+        <p className="subtle">Encrypted on this device.</p>
         <div className="row" style={{ justifyContent: "center", marginTop: 14 }}>
           <button type="button" className="btn" onClick={() => fileInput.current?.click()} disabled={disabled}>
             Choose files

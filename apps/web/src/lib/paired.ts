@@ -73,8 +73,11 @@ export interface SendProgress {
   note?: string;
 }
 
-/** Sends files to a contact: live first when a device is online, stored delivery otherwise or on stall. */
-export async function sendToPairedContact(fp: string, files: () => EnvelopeInput[], opts: { onProgress: (p: SendProgress) => void; signal?: AbortSignal; source?: string }): Promise<{ route: SendRoute; transferId: string; manifest: Manifest }> {
+/**
+ * Sends files to a contact. `auto` tries a live connection when a device is online, then falls back to the
+ * inbox. `inbox` always stores the delivery so it shows up in the receiver's inbox with no scan.
+ */
+export async function sendToPairedContact(fp: string, files: () => EnvelopeInput[], opts: { onProgress: (p: SendProgress) => void; signal?: AbortSignal; source?: string; delivery?: "auto" | "inbox" }): Promise<{ route: SendRoute; transferId: string; manifest: Manifest }> {
   const s = session.getSnapshot();
   if (!s.keys || !s.chain || !s.profile.fingerprint) throw new Error("This browser needs an identity to send to contacts.");
   const record = await getContact(fp);
@@ -86,7 +89,7 @@ export async function sendToPairedContact(fp: string, files: () => EnvelopeInput
   const total = files().reduce((a, f) => a + f.size, 0);
 
   const online = s.presence?.online.get(fp) ?? 0;
-  if (online > 0 && s.presence && s.presence.status === "open" && typeof RTCPeerConnection === "function") {
+  if (opts.delivery !== "inbox" && online > 0 && s.presence && s.presence.status === "open" && typeof RTCPeerConnection === "function") {
     opts.onProgress({ route: "live", phase: "connecting", bytes: 0, total });
     try {
       const r = await sendLive({

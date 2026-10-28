@@ -11,6 +11,12 @@ import { refreshContact } from "./paired";
 import { ReceiveSink, type ReceivedFile } from "./received";
 import { session } from "./session";
 
+/** A stored delivery that arrived after this device had already loaded its inbox. */
+export interface InboxArrival {
+  id: string;
+  senderFp: string;
+}
+
 export interface InboxState {
   items: MailboxItem[];
   loading: boolean;
@@ -18,10 +24,17 @@ export interface InboxState {
   live: IncomingLive[];
   /** Files of completed live transfers, by live transfer id. */
   liveFiles: Record<string, ReceivedFile[]>;
+  /** New mailbox deliveries to surface. The first load is a baseline and does not count. */
+  arrivals: InboxArrival[];
   updatedAt: number;
 }
 
-let state: InboxState = { items: [], loading: false, error: null, live: [], liveFiles: {}, updatedAt: 0 };
+let state: InboxState = { items: [], loading: false, error: null, live: [], liveFiles: {}, arrivals: [], updatedAt: 0 };
+/** Transfer ids already seen. Null until the first successful mailbox load. */
+let knownStored: Set<string> | null = null;
+let refreshChain: Promise<void> = Promise.resolve();
+/** Arrivals already handed to an inbox screen, so a remount does not open them twice. */
+const claimedArrivals = new Set<string>();
 const listeners = new Set<() => void>();
 const liveSinks = new Map<string, ReceiveSink>();
 let stopLive: (() => void) | null = null;
@@ -43,16 +56,54 @@ export function useInbox(): InboxState {
   );
 }
 
-export async function refreshInbox(): Promise<void> {
+export function refreshInbox(): Promise<void> {
+  const run = refreshChain.then(loadMailbox, loadMailbox);
+  refreshChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function loadMailbox(): Promise<void> {
   const s = session.getSnapshot();
   if (!s.active) return;
   set({ loading: true });
   try {
     const { items } = await s.client.mailbox();
-    set({ items, loading: false, error: null, updatedAt: Date.now() });
+    const fresh: InboxArrival[] = [];
+    if (knownStored === null) {
+      knownStored = new Set(items.map((item) => item.transfer_id));
+    } else {
+      for (const item of items) {
+        if (knownStored.has(item.transfer_id)) continue;
+        knownStored.add(item.transfer_id);
+        fresh.push({ id: item.transfer_id, senderFp: item.sender_fp });
+      }
+    }
+    set({
+      items,
+      loading: false,
+      error: null,
+      updatedAt: Date.now(),
+      ...(fresh.length > 0 ? { arrivals: [...fresh, ...state.arrivals.filter((a) => !fresh.some((f) => f.id === a.id))] } : {}),
+    });
   } catch (e) {
     set({ loading: false, error: e instanceof Error ? e.message : String(e) });
   }
+}
+
+/** Hands one arrival to the inbox screen. Returns false if another screen already took it. */
+export function claimArrival(id: string): boolean {
+  if (claimedArrivals.has(id) || !state.arrivals.some((a) => a.id === id)) return false;
+  claimedArrivals.add(id);
+  set({ arrivals: state.arrivals.filter((a) => a.id !== id) });
+  return true;
+}
+
+export function dismissArrival(id: string): void {
+  claimedArrivals.add(id);
+  set({ arrivals: state.arrivals.filter((a) => a.id !== id) });
 }
 
 export function removeInboxItem(transferId: string): void {

@@ -4,14 +4,15 @@
  * chain, unwraps with the matching prekey (deleting one-time prekeys after use), decrypts and verifies.
  */
 import type { MailboxItem, Manifest } from "@sealed/core";
-import { useEffect, useState } from "react";
-import { Navigate } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
+import { DirectReceive } from "../components/direct-receive";
 import { ReceivedFiles } from "../components/ReceivedFiles";
 import { Notice, PageTitle, Progress, Spinner, errorMessage } from "../components/ui";
 import { formatBytes } from "../lib/bytes";
 import { getContact } from "../lib/contacts-store";
 import { useOnUnmount } from "../lib/hooks";
-import { dismissLive, refreshInbox, removeInboxItem, useInbox } from "../lib/inbox";
+import { claimArrival, dismissLive, refreshInbox, removeInboxItem, useInbox } from "../lib/inbox";
 import { openInboxItem } from "../lib/paired";
 import { ReceiveSink, type ReceivedFile } from "../lib/received";
 import { useSession } from "../lib/session";
@@ -26,6 +27,8 @@ interface Opened {
 
 export function InboxPage() {
   const s = useSession();
+  const location = useLocation();
+  const listenNow = Boolean((location.state as { listen?: boolean } | null)?.listen);
   const inbox = useInbox();
   const [names, setNames] = useState<Record<string, string>>({});
   const [opened, setOpened] = useState<Record<string, Opened>>({});
@@ -50,7 +53,22 @@ export function InboxPage() {
     })();
   }, [inbox.items, s.profile.fingerprint]);
 
-  if (!s.profile.fingerprint) return <Navigate to="/welcome" replace />;
+  const openRef = useRef<(item: MailboxItem) => void>(() => undefined);
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (const arrival of inbox.arrivals) {
+      const item = inbox.items.find((i) => i.transfer_id === arrival.id);
+      if (!item) continue;
+      timers.push(
+        setTimeout(() => {
+          if (claimArrival(item.transfer_id)) openRef.current(item);
+        }, 0),
+      );
+    }
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, [inbox.arrivals, inbox.items]);
 
   const open = (item: MailboxItem) => {
     const sink = new ReceiveSink();
@@ -72,18 +90,20 @@ export function InboxPage() {
         setOpened((o) => ({ ...o, [item.transfer_id]: { manifest, done: 0, total: 0, error: errorMessage(e) } }));
       });
   };
-
-  const empty = inbox.items.length === 0 && inbox.live.length === 0 && Object.keys(opened).length === 0;
+  openRef.current = open;
 
   return (
     <div className="stack-lg">
-      <PageTitle eyebrow="Paired">Inbox</PageTitle>
-      {inbox.error && <Notice tone="danger">Could not load the inbox: {inbox.error}</Notice>}
+      <PageTitle eyebrow="Inbox">Files sent to you</PageTitle>
+      <DirectReceive autoStart={listenNow} />
+      {inbox.error && !/fetch|network|Failed to fetch/i.test(inbox.error) && <Notice tone="danger">Could not load saved deliveries: {inbox.error}</Notice>}
       <div className="row between">
-        <span className="subtle">{s.presence?.status === "open" ? "Connected — new deliveries appear here automatically." : "Reconnecting…"}</span>
-        <button type="button" className="btn small" onClick={() => void refreshInbox()} disabled={inbox.loading}>
-          {inbox.loading ? "Refreshing…" : "Refresh"}
-        </button>
+        <span className="subtle">{s.presence?.status === "open" ? "Connected — new deliveries appear here automatically." : "No server. Point the camera at their screen and the file shows up here."}</span>
+        {s.presence?.status === "open" && (
+          <button type="button" className="btn small" onClick={() => void refreshInbox()} disabled={inbox.loading}>
+            {inbox.loading ? "Refreshing…" : "Refresh"}
+          </button>
+        )}
       </div>
 
       {inbox.live.map((l) => (
@@ -113,11 +133,12 @@ export function InboxPage() {
                 {new Date(item.created_at * 1000).toLocaleString()} · expires {new Date(item.expires_at * 1000).toLocaleDateString()}
               </span>
             </div>
-            {!o && (
+            {!o && !inbox.arrivals.some((a) => a.id === item.transfer_id) && (
               <button type="button" className="btn primary" onClick={() => open(item)} data-testid="open-inbox-item">
                 Open
               </button>
             )}
+            {!o && inbox.arrivals.some((a) => a.id === item.transfer_id) && <Progress fraction={0} label="Opening" />}
             {o && !o.files && !o.error && <Progress fraction={o.total ? o.done / o.total : 0} label={o.manifest ? `${o.manifest.files.length} files · ${formatBytes(o.total)}` : "Verifying sender and unwrapping"} />}
             {o?.error && <Notice tone="danger">{o.error}</Notice>}
           </div>
@@ -138,14 +159,7 @@ export function InboxPage() {
 
       {Object.entries(opened).map(([id, o]) => (o.files && inbox.items.some((i) => i.transfer_id === id) ? <AckOnOpen key={id} id={id} /> : null))}
 
-      {inbox.loading && inbox.items.length === 0 && <Spinner label="Loading…" />}
-      {empty && !inbox.loading && (
-        <div className="card sunken">
-          <p className="muted" style={{ margin: 0 }}>
-            Nothing waiting. Files your contacts send appear here.
-          </p>
-        </div>
-      )}
+      {inbox.loading && inbox.items.length === 0 && s.presence?.status === "open" && <Spinner label="Loading…" />}
     </div>
   );
 }

@@ -14,7 +14,9 @@ import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
+import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { InboxArrivalBanner } from "../src/components/inbox-arrival";
 import { attachInbox, refreshInbox } from "../src/lib/inbox";
 import { launchNotificationRoute, listenForPush } from "../src/lib/push";
 import { session, useSession } from "../src/lib/session";
@@ -63,6 +65,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <StatusBar style="light" />
       {s.status === "ready" ? (
+        <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
             headerStyle: { backgroundColor: color.bg },
@@ -75,6 +78,7 @@ export default function RootLayout() {
         >
           <Stack.Screen name="index" options={{ title: "Sealed" }} />
           <Stack.Screen name="welcome" options={{ title: "Set up" }} />
+          <Stack.Screen name="send" options={{ title: "Send" }} />
           <Stack.Screen name="share" options={{ title: "Share" }} />
           <Stack.Screen name="receive" options={{ title: "Receive" }} />
           <Stack.Screen name="c/[transferId]" options={{ title: "Receive", headerBackVisible: false, gestureEnabled: false }} />
@@ -96,6 +100,8 @@ export default function RootLayout() {
           <Stack.Screen name="security" options={{ title: "Security" }} />
           <Stack.Screen name="unknown-code" options={{ title: "Sealed" }} />
         </Stack>
+        <InboxArrivalBanner />
+        </View>
       ) : (
         <Screen>
           {s.status === "loading" ? <Spinner label="Opening this phone's keys…" /> : null}

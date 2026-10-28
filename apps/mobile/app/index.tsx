@@ -1,4 +1,4 @@
-/** Home: Send and Receive as the two primary actions; advanced paths stay secondary. */
+/** Home: one Send and one Receive. The file moves by light, with no relay and no code to scan. */
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
@@ -24,14 +24,15 @@ export default function Home() {
   if (!s.profile.fingerprint) {
     return (
       <Screen>
-        <Title eyebrow="Sealed">Send a file. Receive with a scan.</Title>
-        <P>Receiving needs no setup: scan the sender's code. To send, set up an identity on this phone.</P>
-        <Button title="Receive" tone="primary" onPress={() => router.push("/receive")} testID="action-receive" />
+        <Title eyebrow="Sealed">Send a file. It shows up in their inbox.</Title>
+        <P>No server and no code. Tap Send, and on the other phone point the camera at this screen.</P>
+        <Button title="Send" tone="primary" onPress={() => router.push("/send")} testID="action-share" />
+        <Button title="Receive" onPress={() => router.push({ pathname: "/inbox", params: { listen: "1" } })} testID="action-receive" />
         <Stack>
-          <Tile title="Set up to send" desc="Create an identity, add this phone to yours, or restore with a recovery phrase." onPress={() => router.push("/welcome")} />
+          <Tile title="Set up an identity" desc="Optional. Pairing and codes use an identity. Send and Receive do not." onPress={() => router.push("/welcome")} />
           <Tile title="Receive offline" desc="Show your key and read a stream from the sender's screen. No network needed." onPress={() => router.push("/offline/receive")} />
           <Tile title="Received files" right={received === null ? "…" : `${received}`} onPress={() => router.push("/files")} />
-          <Tile title="Settings" right="relay, security" onPress={() => router.push("/settings")} />
+          <Tile title="Settings" right="security" onPress={() => router.push("/settings")} />
           <Tile title="Benchmark" right="offline speed" onPress={() => router.push("/bench")} testID="action-bench" />
         </Stack>
       </Screen>
@@ -43,26 +44,27 @@ export default function Home() {
 
   return (
     <Screen>
-      <Title eyebrow={s.profile.label}>Send a file. Receive with a scan.</Title>
-      {!s.active ? <Notice tone="danger">This phone is no longer an active device of your identity (it may have been revoked). Sending is disabled. You can still receive.</Notice> : null}
+      <Title eyebrow={s.profile.label}>Send a file. It shows up in their inbox.</Title>
+      {s.profile.fingerprint && !s.active ? <Notice>This phone is no longer an active device of your identity. You can still send and receive directly.</Notice> : null}
       <Stack>
         <Tile
           primary
           title="Send"
-          desc={'Drop files and show a code. Turn on "Allow multiple people" for a room.'}
-          onPress={() => router.push("/share")}
+          desc="Drop the files and tap Send. Their camera reads your screen. No server."
+          onPress={() => router.push("/send")}
           testID="action-share"
         />
-        <Tile title="Receive" desc="Point your camera at a Sealed code." onPress={() => router.push("/receive")} testID="action-receive" />
+        <Tile title="Receive" desc={waiting > 0 ? `${waiting} already waiting. New files show up here.` : "Tap once and point your camera at their screen."} onPress={() => router.push({ pathname: "/inbox", params: { listen: "1" } })} testID="action-receive" />
       </Stack>
       <Stack>
+        <Tile title="Show a code to scan" desc="For someone in the room who has not paired." onPress={() => router.push("/share")} />
+        <Tile title="Scan a code" desc="Point your camera at a Sealed code." onPress={() => router.push("/receive")} />
         <Tile title="No network — stream through the screen" desc="When neither device can reach the internet." onPress={() => router.push("/offline")} testID="action-offline" />
-        <Tile title="Inbox" right={`${waiting} waiting`} onPress={() => router.push("/inbox")} />
         <Tile title="Contacts" right={contacts === null ? "…" : `${contacts} paired`} onPress={() => router.push("/contacts")} />
         <Tile title="Received files" right={received === null ? "…" : `${received}`} onPress={() => router.push("/files")} />
         <Tile title="Devices" right={`${devices} active`} onPress={() => router.push("/devices")} />
-        <Tile title="Settings" right="relay, security" onPress={() => router.push("/settings")} />
-          <Tile title="Benchmark" right="offline speed" onPress={() => router.push("/bench")} testID="action-bench" />
+        <Tile title="Settings" right="security" onPress={() => router.push("/settings")} />
+        <Tile title="Benchmark" right="offline speed" onPress={() => router.push("/bench")} testID="action-bench" />
       </Stack>
     </Screen>
   );
