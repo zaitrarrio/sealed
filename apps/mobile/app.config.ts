@@ -85,7 +85,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       ["expo-build-properties", { android: { minSdkVersion: 31 }, ios: {} }],
-      ["@config-plugins/react-native-webrtc", { cameraPermission: "Sealed uses the camera to scan codes.", microphonePermission: "Sealed listens through the microphone only while you receive a sound transfer." }],
+      ["@config-plugins/react-native-webrtc", { cameraPermission: "Sealed uses the camera to scan codes.", microphonePermission: "Sealed listens through the microphone only while you receive a sound transfer or join a call." }],
       ["react-native-quick-crypto", { sodiumEnabled: false }],
       "expo-dev-client",
     ],

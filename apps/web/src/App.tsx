@@ -13,6 +13,7 @@ import { OnboardingPage } from "./routes/Onboarding";
 import { PairPage } from "./routes/Pair";
 import { ReceivePage } from "./routes/Receive";
 import { SecurityPage, SettingsPage } from "./routes/Settings";
+import { CallContactPage, CallIncomingHost } from "./routes/Call";
 import { SendToContactPage } from "./routes/SendToContact";
 import { SharePage } from "./routes/Share";
 
@@ -92,7 +93,12 @@ function Shell() {
             Sealed could not open this browser's storage: {s.error}. Private windows and blocked site data prevent Sealed from keeping device keys.
           </div>
         )}
-        {s.status === "ready" && <Outlet />}
+        {s.status === "ready" && (
+          <>
+            <Outlet />
+            <CallIncomingHost />
+          </>
+        )}
       </main>
     </div>
   );
@@ -144,6 +150,7 @@ export const router = createBrowserRouter([
       { path: "pair", element: <PairPage /> },
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:fp/send", element: <SendToContactPage /> },
+      { path: "contacts/:fp/call", element: <CallContactPage /> },
       { path: "inbox", element: <InboxPage /> },
       { path: "devices", element: <DevicesPage /> },
       { path: "devices/add", element: <AddDevicePage /> },

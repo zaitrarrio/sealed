@@ -325,6 +325,8 @@ export function startLiveReceiver(o: LiveReceiverOptions): () => void {
       return;
     }
     if (msg.kind !== "offer" || sessions.has(key)) return;
+    // Paired calls use the same signaling path with call=true (ADR-0013); this receiver is data-only.
+    if (msg.call) return;
     if (!dtlsMatches(msg)) return;
     const pc = new RTCPeerConnection({ iceServers: await iceServers(o.client) });
     sessions.set(key, { pc });

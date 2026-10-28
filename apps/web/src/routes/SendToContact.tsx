@@ -38,6 +38,11 @@ export function SendToContactPage() {
     <div className="stack-lg">
       <PageTitle eyebrow="Send to contact">To {contact.displayName}</PageTitle>
       {contact.blocked && <Notice tone="danger">{contact.blocked.reason}</Notice>}
+      {!result && !contact.blocked && online > 0 && (
+        <Link to={`/contacts/${fp}/call`} className="btn ghost" data-testid="open-call">
+          Call instead
+        </Link>
+      )}
       {!result && <FilePicker files={files} onChange={setFiles} disabled={busy} />}
       {!result && !contact.blocked && (
         <>

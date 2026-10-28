@@ -73,7 +73,8 @@ This is a first, complete implementation of the specification, not yet productio
   Node, slower on phones). Air-gap and Broadcast work end to end, but at a fraction of the spec's data rates
   until a native or GPU decoder replaces it.
 - **Acoustic transfer** (speaker → mic) is available as an offline channel beside the screen (ADR-0024). Design
-  targets are ~0.4–1.5 KB/s before FEC; do not quote product rates until a two-phone bench passes A0.
+  targets are ~0.4–1.5 KB/s before FEC; do not quote product rates until a two-phone bench passes A0. Paired
+  calls encrypt Opus frames under an HPKE call key and refuse browsers without encoded-frame encryption.
 - **Native keystore code is unbuilt here.** The Swift and Kotlin modules were written without Xcode or the
   Android SDK available; build and test them on real devices first.
 - **No independent security audit yet.** The cryptography uses audited libraries and passes published test
