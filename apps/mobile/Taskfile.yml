@@ -57,6 +57,21 @@ tasks:
     cmds:
       - npx eas-cli build --profile development --platform android
 
+  build:eas:production:
+    desc: Trigger an EAS production iOS build (App Store binary, not submitted)
+    cmds:
+      - npx eas-cli build --profile production --platform ios
+
+  build:eas:testflight:
+    desc: Build the production iOS app and submit it to TestFlight
+    cmds:
+      - npx eas-cli build --profile production --platform ios --auto-submit
+
+  submit:testflight:
+    desc: Submit the latest production iOS build to TestFlight
+    cmds:
+      - npx eas-cli submit --profile production --platform ios --latest
+
   clean:
     desc: Remove build output, Expo cache, generated native builds, and test artifacts
     cmds:

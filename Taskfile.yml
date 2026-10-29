@@ -109,6 +109,21 @@ tasks:
     cmds:
       - task: mobile:build:eas:android
 
+  build:eas:production:
+    desc: Trigger an EAS production iOS build (alias for mobile:build:eas:production)
+    cmds:
+      - task: mobile:build:eas:production
+
+  build:eas:testflight:
+    desc: Build the production iOS app and submit it to TestFlight (alias for mobile:build:eas:testflight)
+    cmds:
+      - task: mobile:build:eas:testflight
+
+  submit:testflight:
+    desc: Submit the latest production iOS build to TestFlight (alias for mobile:submit:testflight)
+    cmds:
+      - task: mobile:submit:testflight
+
   clean:
     desc: Complete clean of build outputs, caches, and test artifacts across all packages
     cmds:
