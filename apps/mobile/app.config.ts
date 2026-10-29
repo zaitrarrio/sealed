@@ -55,7 +55,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         NSFaceIDUsageDescription: "Sealed uses Face ID to unlock this device's keys when you approve or open a transfer.",
         NSMicrophoneUsageDescription: "Sealed does not record audio. WebRTC requires this declaration for direct transfers.",
         UIBackgroundModes: ["remote-notification"],
-        ITSAppUsesNonExemptEncryption: true,
+        // Standard algorithms only (ADR-0002). App Store Connect has no compliance code, and `true` without ITSEncryptionExportComplianceCode is rejected as ITMS-90592.
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
