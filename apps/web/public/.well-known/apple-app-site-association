@@ -2,7 +2,7 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["TEAMID.to.sealed.app"],
+        "appIDs": ["P55B7RX799.to.sealed.app"],
         "components": [
           { "/": "/c/*", "comment": "claim codes" },
           { "/": "/p", "comment": "pairing codes" },
@@ -12,5 +12,5 @@
       }
     ]
   },
-  "webcredentials": { "apps": ["TEAMID.to.sealed.app"] }
+  "webcredentials": { "apps": ["P55B7RX799.to.sealed.app"] }
 }
