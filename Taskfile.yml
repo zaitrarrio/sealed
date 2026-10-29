@@ -206,11 +206,12 @@ tasks:
       - task: mobile:export
 
   dev:
-    desc: Local relay (:8787) and web client (:5173) together
-    deps: [relay:dev, web:web]
+    desc: Reuse or start Cloudflare tunnels for the relay and Expo dev server, configure local env, and launch the development build
+    cmds:
+      - node tools/dev.mjs
 
   dev:all:
-    desc: Local relay (:8787) and web client (:5173) together (alias for dev)
+    desc: Alias for dev
     cmds:
       - task: dev
 
@@ -225,11 +226,16 @@ tasks:
       - task: web:web
 
   dev:tunnel:
-    desc: Open Cloudflare tunnel as relay, configure relay, and run services
+    desc: Start or reuse Cloudflare tunnels and write them into local env files
     cmds:
-      - node tools/relay-tunnel.mjs --start-relay
+      - node tools/dev-tunnel.mjs
+
+  dev:down:
+    desc: Stop Cloudflare tunnels and remove their pid and url files
+    cmds:
+      - node tools/dev-down.mjs
 
   dev:relay:tunnel:
-    desc: Run relay with Cloudflare tunnel and configure relay URL
+    desc: Alias for dev:tunnel
     cmds:
-      - node tools/relay-tunnel.mjs --start-relay
+      - task: dev:tunnel

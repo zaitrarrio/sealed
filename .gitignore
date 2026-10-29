@@ -16,4 +16,6 @@ pkg/
 deploy/selfhost/.env
 .turbo/
 .relay-url
+.dev-tunnels.json
+.tunnel.*
 *.zip

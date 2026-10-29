@@ -7,10 +7,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "turbo dev",
-    "dev:tunnel": "turbo dev:tunnel",
-    "dev:relay:tunnel": "node tools/relay-tunnel.mjs --start-relay",
-    "tunnel": "node tools/relay-tunnel.mjs",
+    "dev": "node tools/dev.mjs",
+    "dev:tunnel": "node tools/dev-tunnel.mjs",
+    "dev:down": "node tools/dev-down.mjs",
+    "dev:relay:tunnel": "node tools/dev-tunnel.mjs",
+    "tunnel": "node tools/dev-tunnel.mjs",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "bench": "pnpm --filter @sealed/core bench",
