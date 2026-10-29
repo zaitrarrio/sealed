@@ -1,10 +1,21 @@
 /**
- * Mobile acoustic I/O (ADR-0024) via expo-av: play Float32 PCM as short WAV clips; record and feed the
+ * Mobile acoustic I/O (ADR-0024) via expo-audio: play Float32 PCM as short WAV clips; record and feed the
  * AcousticReceiver. The mic is requested only while listening.
  */
-import { Audio } from "expo-av";
-import { Directory, File, Paths } from "expo-file-system";
 import { acousticProfile, type AcousticProfileId, type AcousticReceiver, type AcousticSender } from "@sealed/core";
+import {
+  AudioModule,
+  AudioQuality,
+  IOSOutputFormat,
+  createAudioPlayer,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  type AudioRecorder,
+  type AudioStatus,
+  type RecordingOptions,
+} from "expo-audio";
+import { Directory, File, Paths } from "expo-file-system";
+import { Platform } from "react-native";
 
 function floatToWav(pcm: Float32Array, sampleRate: number): Uint8Array {
   const dataLength = pcm.length * 2;
@@ -41,6 +52,50 @@ function cacheDir(): Directory {
   return d;
 }
 
+function playWav(uri: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("aborted"));
+  const player = createAudioPlayer({ uri }, { updateInterval: 50, keepAudioSessionActive: true });
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      subscription.remove();
+      signal?.removeEventListener("abort", onAbort);
+      try {
+        player.remove();
+      } catch {
+        /* already released */
+      }
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => {
+      try {
+        player.pause();
+      } catch {
+        /* already released */
+      }
+      finish(new Error("aborted"));
+    };
+    const onStatus = (status: AudioStatus) => {
+      if (!status.isLoaded) return;
+      if (status.error) {
+        finish(new Error(status.error));
+        return;
+      }
+      if (status.didJustFinish) finish();
+    };
+    const subscription = player.addListener("playbackStatusUpdate", onStatus);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    player.play();
+  });
+}
+
 /** Plays PCM packets from an AcousticSender until finished or aborted. */
 export async function playAcousticSender(
   sender: AcousticSender,
@@ -48,7 +103,7 @@ export async function playAcousticSender(
   opts: { signal?: AbortSignal; onPacket?: (n: number) => void } = {},
 ): Promise<void> {
   const p = acousticProfile(profile);
-  await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+  await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
   const dir = cacheDir();
   let n = 0;
   while (!sender.finished) {
@@ -58,23 +113,7 @@ export async function playAcousticSender(
     const file = new File(dir, `sealed-acoustic-${n}.wav`);
     file.create();
     file.write(wav);
-    const { sound } = await Audio.Sound.createAsync({ uri: file.uri }, { shouldPlay: true });
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        void sound.stopAsync().finally(() => {
-          void sound.unloadAsync();
-          reject(new Error("aborted"));
-        });
-      };
-      opts.signal?.addEventListener("abort", onAbort, { once: true });
-      sound.setOnPlaybackStatusUpdate((st) => {
-        if (!st.isLoaded) return;
-        if (st.didJustFinish) {
-          opts.signal?.removeEventListener("abort", onAbort);
-          void sound.unloadAsync().then(() => resolve());
-        }
-      });
-    });
+    await playWav(file.uri, opts.signal);
     n++;
     opts.onPacket?.(n);
     try {
@@ -85,31 +124,56 @@ export async function playAcousticSender(
   }
 }
 
-const recordOpts = (sampleRate: number) => ({
-  android: {
+function recordOptions(sampleRate: number): RecordingOptions {
+  return {
     extension: ".wav",
-    outputFormat: Audio.AndroidOutputFormat.DEFAULT,
-    audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
     sampleRate,
     numberOfChannels: 1,
     bitRate: sampleRate * 16,
-  },
-  ios: {
-    extension: ".wav",
-    outputFormat: Audio.IOSOutputFormat.LINEARPCM,
-    audioQuality: Audio.IOSAudioQuality.MAX,
-    sampleRate,
-    numberOfChannels: 1,
-    bitRate: sampleRate * 16,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
-  },
-  web: {
-    mimeType: "audio/wav",
-    bitsPerSecond: sampleRate * 16,
-  },
-});
+    android: {
+      extension: ".wav",
+      outputFormat: "default",
+      audioEncoder: "default",
+      sampleRate,
+    },
+    ios: {
+      extension: ".wav",
+      outputFormat: IOSOutputFormat.LINEARPCM,
+      audioQuality: AudioQuality.MAX,
+      sampleRate,
+      linearPCMBitDepth: 16,
+      linearPCMIsBigEndian: false,
+      linearPCMIsFloat: false,
+    },
+    web: {
+      mimeType: "audio/wav",
+      bitsPerSecond: sampleRate * 16,
+    },
+  };
+}
+
+/** `AudioRecorder` is constructed with platform fields flattened, the same shape expo-audio passes natively. */
+function nativeRecordingOptions(sampleRate: number): RecordingOptions {
+  const options = recordOptions(sampleRate);
+  const common = {
+    extension: options.extension,
+    sampleRate: options.sampleRate,
+    numberOfChannels: options.numberOfChannels,
+    bitRate: options.bitRate,
+    isMeteringEnabled: false,
+  };
+  if (Platform.OS === "android") return { ...common, ...options.android } as unknown as RecordingOptions;
+  if (Platform.OS === "web") return { ...common, ...options.web } as unknown as RecordingOptions;
+  return { ...common, ...options.ios } as unknown as RecordingOptions;
+}
+
+function releaseRecorder(recorder: AudioRecorder) {
+  try {
+    recorder.release();
+  } catch {
+    /* already released */
+  }
+}
 
 /** Records from the mic in short clips and feeds PCM into the receiver. */
 export async function captureAcousticReceiver(
@@ -118,12 +182,14 @@ export async function captureAcousticReceiver(
   opts: { signal?: AbortSignal; onProgress?: () => void } = {},
 ): Promise<void> {
   const p = acousticProfile(profile);
-  await Audio.requestPermissionsAsync();
-  await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+  const permission = await requestRecordingPermissionsAsync();
+  if (!permission.granted) throw new Error("microphone permission denied");
+  await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
 
-  const recording = new Audio.Recording();
-  await recording.prepareToRecordAsync(recordOpts(p.sampleRate));
-  await recording.startAsync();
+  const options = recordOptions(p.sampleRate);
+  const recording = new AudioModule.AudioRecorder(nativeRecordingOptions(p.sampleRate));
+  await recording.prepareToRecordAsync(options);
+  recording.record();
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -142,8 +208,8 @@ export async function captureAcousticReceiver(
         }
         opts.onProgress?.();
         try {
-          await recording.stopAndUnloadAsync();
-          const uri = recording.getURI();
+          await recording.stop();
+          const uri = recording.uri;
           if (uri) {
             const file = new File(uri);
             if (file.exists) {
@@ -163,8 +229,8 @@ export async function captureAcousticReceiver(
             }
           }
           if (!receiver.progress.complete && !opts.signal?.aborted) {
-            await recording.prepareToRecordAsync(recordOpts(p.sampleRate));
-            await recording.startAsync();
+            await recording.prepareToRecordAsync(options);
+            recording.record();
             setTimeout(() => void tick(), 400);
             return;
           }
@@ -177,10 +243,10 @@ export async function captureAcousticReceiver(
     });
   } finally {
     try {
-      const st = await recording.getStatusAsync();
-      if (st.isRecording) await recording.stopAndUnloadAsync();
+      if (recording.isRecording) await recording.stop();
     } catch {
       /* already stopped */
     }
+    releaseRecorder(recording);
   }
 }

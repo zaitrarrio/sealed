@@ -77,7 +77,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-router",
       "expo-secure-store",
       "expo-sharing",
-      "expo-av",
+      [
+        "expo-audio",
+        {
+          microphonePermission: "Sealed listens through the microphone only while you receive a sound transfer or join a call.",
+          recordAudioAndroid: false,
+          enableBackgroundPlayback: false,
+          enableBackgroundRecording: false,
+        },
+      ],
       [
         "expo-notifications",
         {
